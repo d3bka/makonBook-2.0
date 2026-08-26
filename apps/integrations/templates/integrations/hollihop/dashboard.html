@@ -1,0 +1,138 @@
+{% extends 'template.html' %}
+{% block title-main %}Hollihop Integration{% endblock title-main %}
+{% block title %}Manager{% endblock title %}
+{% block style %}
+<style>
+.holli-shell{max-width:1240px;margin:0 auto;padding:8px 0 40px}.holli-hero,.holli-card{background:var(--bs-body-bg,#fff);border:1px solid rgba(148,163,184,.25);border-radius:20px;box-shadow:0 12px 35px rgba(15,23,42,.07)}
+.holli-hero{padding:28px;display:flex;align-items:flex-start;justify-content:space-between;gap:22px}.holli-hero h1{margin:5px 0 9px;font-size:30px}.holli-hero p{margin:0;color:#64748b;max-width:760px;line-height:1.55}.holli-status{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:#eef2ff;font-weight:800;font-size:13px}.holli-dot{width:9px;height:9px;border-radius:50%;background:#64748b}.holli-dot.ok{background:#16a34a}.holli-dot.warn{background:#d97706}.holli-dot.off{background:#dc2626}
+.holli-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.holli-btn{border:0;border-radius:10px;padding:11px 15px;font-weight:800;text-decoration:none;cursor:pointer;background:#111827;color:#fff}.holli-btn.secondary{background:#eef2ff;color:#312e81}.holli-btn.danger{background:#fff1f2;color:#be123c;border:1px solid #fecdd3}.holli-btn:disabled{opacity:.5;cursor:not-allowed}.holli-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px;margin:18px 0}.holli-stat{padding:18px;border-radius:16px;background:#fff;border:1px solid #e5e7eb}.holli-stat span{display:block;color:#64748b;font-size:13px}.holli-stat strong{font-size:27px}.holli-card{padding:22px;margin-top:18px}.holli-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}.holli-head h2{margin:0;font-size:20px}.holli-muted{color:#64748b}.holli-table-wrap{overflow-x:auto}.holli-table{width:100%;border-collapse:collapse;min-width:760px}.holli-table th,.holli-table td{padding:12px;border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top}.holli-table th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#64748b}.holli-badge{display:inline-block;padding:5px 9px;border-radius:999px;background:#f1f5f9;font-size:12px;font-weight:800}.holli-form-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.holli-form-row input{max-width:120px;padding:9px;border:1px solid #cbd5e1;border-radius:8px}.holli-alert{padding:12px 15px;border-radius:12px;margin-bottom:12px;background:#f8fafc;border:1px solid #e2e8f0}.holli-split{display:grid;grid-template-columns:1fr 1fr;gap:18px}.holli-code{font-family:ui-monospace,monospace;font-size:12px;color:#475569}.holli-flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.holli-flow>div{padding:14px;border:1px solid #e5e7eb;border-radius:14px;background:#f8fafc}.holli-flow strong{display:block;margin-bottom:5px}.holli-warning{padding:14px;border-radius:14px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;margin-top:14px;line-height:1.5}.holli-okbox{padding:14px;border-radius:14px;background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;margin-top:14px;line-height:1.5}
+@media(max-width:980px){.holli-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.holli-split{grid-template-columns:1fr}.holli-flow{grid-template-columns:1fr 1fr}.holli-hero{flex-direction:column}}@media(max-width:520px){.holli-grid,.holli-flow{grid-template-columns:1fr}.holli-hero,.holli-card{padding:18px;border-radius:16px}.holli-hero h1{font-size:25px}.holli-actions .holli-btn{width:100%;text-align:center}}
+</style>
+{% endblock style %}
+{% block content %}
+<div class="holli-shell">
+  {% if messages %}{% for message in messages %}<div class="holli-alert">{{ message }}</div>{% endfor %}{% endif %}
+
+  <section class="holli-hero">
+    <div>
+      <div class="holli-status">
+        <span class="holli-dot {% if enabled and configured and initial_sync_completed %}ok{% elif enabled and configured %}warn{% else %}off{% endif %}"></span>
+        {% if enabled and configured and initial_sync_completed %}Connected · smart sync active{% elif enabled and configured %}Connected · waiting for manual initial sync{% else %}Not ready{% endif %}
+      </div>
+      <h1>Hollihop → MakonBook</h1>
+      <p>Hollihop is the administrative source of truth. MakonBook reads it, keeps only allowed GROUP users/classes, and never starts a full import merely because Django or Celery was restarted.</p>
+
+      <div class="holli-actions">
+        {% if not initial_sync_completed %}
+          <form method="post" action="{% url 'hollihop_initial_sync' %}" onsubmit="return confirm('Run the first FULL Hollihop import into THIS MakonBook database? This does not write back to Hollihop and credentials are not sent.');">
+            {% csrf_token %}<input type="hidden" name="confirm" value="INITIAL">
+            <button class="holli-btn" type="submit">Run initial sync</button>
+          </form>
+        {% else %}
+          <form method="post" action="{% url 'hollihop_smart_sync' %}">{% csrf_token %}<button class="holli-btn" type="submit">Check updates now</button></form>
+          <form method="post" action="{% url 'hollihop_membership_sync' %}" onsubmit="return confirm('Run the relation-only membership sweep now? This is heavier than the normal 5-minute delta check, but it does NOT request Days/payments.');">
+            {% csrf_token %}<input type="hidden" name="confirm" value="MEMBERSHIPS">
+            <button class="holli-btn secondary" type="submit">Sync memberships now</button>
+          </form>
+          <form method="post" action="{% url 'hollihop_full_reconciliation' %}" onsubmit="return confirm('Run a complete Hollihop reconciliation now? Use this only for diagnostics/recovery, not as the normal sync path.');">
+            {% csrf_token %}<input type="hidden" name="confirm" value="FULL">
+            <button class="holli-btn danger" type="submit">Full reconciliation</button>
+          </form>
+        {% endif %}
+        <a class="holli-btn secondary" href="{% url 'manager_dashboard' %}">Back to Manager Panel</a>
+      </div>
+
+      {% if not initial_sync_completed %}
+        <div class="holli-warning"><strong>Automatic sync is currently blocked.</strong> This is intentional: local development, runserver reloads and Celery restarts cannot trigger an import before you explicitly press <em>Run initial sync</em>.</div>
+      {% else %}
+        <div class="holli-okbox"><strong>Automatic mode:</strong> lightweight update checks every {{ sync_interval_minutes }} minutes. The heavy membership relation sweep runs only every {{ membership_sweep_minutes }} minutes and never requests Days/payments.</div>
+      {% endif %}
+    </div>
+    <div class="holli-muted">
+      <strong>Provider:</strong> {{ provider }}<br>
+      <strong>Mode:</strong> {{ mode }}<br>
+      <strong>Allowed LearningType:</strong> {{ allowed_learning_types }}<br>
+      <strong>Webhook:</strong> {% if webhook_configured %}secret configured{% else %}not configured{% endif %}<br>
+      <strong>Initial sync:</strong> {% if initial_sync_completed %}completed{% else %}not run{% endif %}<br>
+      <strong>Last status:</strong> {% if state %}{{ state.get_last_status_display }}{% else %}Never synced{% endif %}<br>
+      <strong>Last successful sync:</strong> {% if state.last_successful_sync %}{{ state.last_successful_sync|date:'d M Y, H:i' }}{% else %}—{% endif %}<br>
+      <strong>Last smart sync:</strong> {% if state.last_incremental_sync %}{{ state.last_incremental_sync|date:'d M Y, H:i' }}{% else %}—{% endif %}
+    </div>
+  </section>
+
+  <div class="holli-grid">
+    <div class="holli-stat"><span>Students</span><strong>{{ students_count }}</strong></div>
+    <div class="holli-stat"><span>Teachers</span><strong>{{ teachers_count }}</strong></div>
+    <div class="holli-stat"><span>Managers</span><strong>{{ managers_count }}</strong></div>
+    <div class="holli-stat"><span>Classrooms</span><strong>{{ classrooms_count }}</strong></div>
+    <div class="holli-stat"><span>Attendance</span><strong>{{ attendance_count }}</strong></div>
+    <div class="holli-stat"><span>Conflicts</span><strong>{{ conflicts_count }}</strong></div>
+  </div>
+
+  <section class="holli-card">
+    <div class="holli-head"><div><h2>Sync strategy</h2><div class="holli-muted">Built around Hollihop's 600 requests / 30 sec limit and their warning about GetEdUnitStudents.</div></div></div>
+    <div class="holli-flow">
+      <div><strong>Every {{ sync_interval_minutes }} min</strong><span>Student delta + EdUnit delta. Only changed rows are fetched where Hollihop supports lastUpdatedFrom.</span></div>
+      <div><strong>Every {{ teacher_poll_minutes }} min</strong><span>Teacher list check. Existing MakonBook teachers are updated only when fields/role state changed.</span></div>
+      <div><strong>Every {{ membership_sweep_minutes }} min</strong><span>Relation-only membership safety sweep. No Days/payments. Historical/ended EdUnits are ignored and unknown classrooms are created only when a current student actually belongs to them.</span></div>
+      <div><strong>Every {{ student_profile_sweep_minutes }} / {{ edunit_catalog_sweep_minutes }} min</strong><span>Low-frequency student profile / EdUnit catalog safety checks for changes Hollihop cannot signal incrementally.</span></div>
+    </div>
+    <div class="holli-warning"><strong>Membership limitation:</strong> Hollihop confirmed that adding/removing a student from an EdUnit does not update EdUnit.lastUpdated. That is why a low-frequency relation sweep is still necessary; doing a full GetEdUnitStudents export every 5 minutes would be the wrong implementation.</div>
+  </section>
+
+  <div class="holli-split">
+    <section class="holli-card">
+      <div class="holli-head"><div><h2>Credentials & SMS</h2><div class="holli-muted">Synchronization and credential delivery are intentionally separate.</div></div></div>
+      <div class="holli-muted"><strong>SMS provider:</strong> {{ sms_provider }}<br><strong>Automatic credentials on sync:</strong> {% if credentials_auto_send %}ON{% else %}OFF{% endif %}</div>
+      {% if not credentials_auto_send %}<div class="holli-okbox">Safe for Eskiz testing: initial/smart/full sync buttons do not send or rotate credentials automatically.</div>{% endif %}
+      <div class="holli-grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin:14px 0 0">
+        <div class="holli-stat"><span>Email + SMS</span><strong>{{ delivery_channel_counts.email_sms|default:0 }}</strong></div>
+        <div class="holli-stat"><span>Email only</span><strong>{{ delivery_channel_counts.email_only|default:0 }}</strong></div>
+        <div class="holli-stat"><span>SMS only</span><strong>{{ delivery_channel_counts.sms_only|default:0 }}</strong></div>
+        <div class="holli-stat"><span>Failed / no contact</span><strong>{{ delivery_channel_counts.failed|default:0 }}</strong></div>
+      </div>
+    </section>
+    <section class="holli-card">
+      <div class="holli-head"><div><h2>CLI safety tools</h2><div class="holli-muted">Dry-run first when changing filters or mappings.</div></div></div>
+      <div class="holli-code">python manage.py sync_hollihop --all --dry-run</div><br>
+      <div class="holli-code">python manage.py sync_hollihop --all</div><br>
+      <div class="holli-muted">Do not use <span class="holli-code">--send-credentials</span> while Eskiz is still in test mode.</div>
+    </section>
+  </div>
+
+  <section class="holli-card">
+    <div class="holli-head"><div><h2>Pending conflicts</h2><div class="holli-muted">Ambiguous users are never guessed. If Hollihop exposes no teacher for a current EdUnit, choose its MakonBook teacher once; that mapping is reused automatically.</div></div><span class="holli-badge">{{ conflicts_count }} pending</span></div>
+    <div class="holli-table-wrap"><table class="holli-table"><thead><tr><th>Hollihop object</th><th>Contact</th><th>Reason</th><th>Candidates</th><th>Action</th></tr></thead><tbody>
+      {% for conflict in conflicts %}<tr><td><strong>{{ conflict.external_type }} #{{ conflict.external_id }}</strong><br>{{ conflict.display_name }}</td><td>{{ conflict.normalized_email|default:'—' }}<br>{{ conflict.normalized_phone|default:'—' }}</td><td>{{ conflict.reason }}</td><td>{{ conflict.candidate_user_ids|join:', ' }}</td><td>
+        <form class="holli-form-row" method="post" action="{% url 'hollihop_resolve_conflict' conflict.id %}">{% csrf_token %}
+          {% if conflict.external_type == 'classroom' %}
+            <select name="user_id" required style="min-width:220px">
+              <option value="">Choose teacher…</option>
+              {% for teacher in teacher_choices %}<option value="{{ teacher.id }}">#{{ teacher.id }} · {{ teacher.get_full_name|default:teacher.username }}{% if teacher.profile.hollihop_teacher_id %} · HH {{ teacher.profile.hollihop_teacher_id }}{% endif %}</option>{% endfor %}
+            </select>
+            <button class="holli-btn secondary" name="action" value="link">Map teacher</button>
+          {% else %}
+            <input type="number" name="user_id" placeholder="User ID">
+            <button class="holli-btn secondary" name="action" value="link">Link</button>
+          {% endif %}
+          <button class="holli-btn danger" name="action" value="ignore">Ignore</button>
+        </form>
+      </td></tr>{% empty %}<tr><td colspan="5">No pending conflicts.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+
+  <section class="holli-card">
+    <div class="holli-head"><div><h2>Failed / partial credential deliveries</h2><div class="holli-muted">Resend creates a completely new temporary password and invalidates the current MakonBook password.</div></div></div>
+    <div class="holli-table-wrap"><table class="holli-table"><thead><tr><th>User</th><th>Status</th><th>Email</th><th>SMS</th><th>Action</th></tr></thead><tbody>
+      {% for delivery in failed_deliveries %}<tr><td><strong>{{ delivery.user.get_full_name|default:delivery.user.username }}</strong><br>#{{ delivery.user.id }}</td><td>{{ delivery.get_overall_status_display }}</td><td>{{ delivery.get_email_status_display }}{% if delivery.email_error_safe %}<br><small>{{ delivery.email_error_safe }}</small>{% endif %}</td><td>{{ delivery.get_sms_status_display }}{% if delivery.sms_error_safe %}<br><small>{{ delivery.sms_error_safe }}</small>{% endif %}</td><td><form method="post" action="{% url 'hollihop_resend_credentials' delivery.user.id %}" onsubmit="return confirm('This will reset the user’s current MakonBook password. Continue?');">{% csrf_token %}<input type="hidden" name="confirm" value="RESET"><button class="holli-btn danger" type="submit">Reset & resend</button></form></td></tr>{% empty %}<tr><td colspan="5">No failed deliveries.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+
+  <section class="holli-card">
+    <div class="holli-head"><div><h2>Recent sync activity</h2><div class="holli-muted">Audit metadata only. Credentials and API secrets are never logged.</div></div></div>
+    <div class="holli-table-wrap"><table class="holli-table"><thead><tr><th>Time</th><th>Event</th><th>Object</th><th>User / classroom</th></tr></thead><tbody>
+      {% for log in recent_logs %}<tr><td>{{ log.created_at|date:'d M H:i' }}</td><td>{{ log.get_event_type_display|default:log.event_type }}</td><td>{{ log.entity_type }} {{ log.external_id }}</td><td>{% if log.user %}{{ log.user.get_full_name|default:log.user.username }}{% endif %}{% if log.classroom %}<br>{{ log.classroom.name }}{% endif %}</td></tr>{% empty %}<tr><td colspan="4">No sync activity yet.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+</div>
+{% endblock content %}

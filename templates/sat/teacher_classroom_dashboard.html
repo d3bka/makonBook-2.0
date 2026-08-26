@@ -28,6 +28,7 @@
           <i class="bi bi-graph-up-arrow"></i>
           Progress
         </a>
+        {% if classroom.hollihop_edunit_id %}<a href="{% url 'hollihop_classroom_attendance' classroom.id %}" class="mk-btn mk-btn-secondary"><i class="bi bi-calendar-check"></i> Attendance</a>{% endif %}
         <a href="{% url 'rating_teacher_classroom' classroom.id %}" class="mk-btn">
           <i class="bi bi-star-fill"></i>
           Assess students

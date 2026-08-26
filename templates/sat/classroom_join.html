@@ -50,6 +50,12 @@
             Open classrooms
           </a>
         {% endif %}
+        {% if request.user.profile.hollihop_client_id %}
+          <a href="{% url 'hollihop_my_attendance' %}" class="sg-btn sg-btn-secondary">
+            <i class="bi bi-calendar-check"></i>
+            My attendance
+          </a>
+        {% endif %}
       </div>
 
       <div class="sg-motivation">

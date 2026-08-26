@@ -1,0 +1,5 @@
+{% extends 'template.html' %}
+{% block title-main %}{{ classroom.name }} Attendance{% endblock title-main %}
+{% block content %}
+<div style="max-width:1100px;margin:0 auto;padding:10px 0 40px"><a href="{% url 'teacher_classroom_dashboard' classroom.id %}">← Classroom</a><h2>{{ classroom.name }} · Attendance</h2><div style="overflow-x:auto"><table class="table"><thead><tr><th>Date</th><th>Student</th><th>Status</th><th>Accepted</th><th>Comment</th></tr></thead><tbody>{% for row in records %}<tr><td>{{ row.date }}</td><td>{{ row.student.get_full_name|default:row.student.username }}</td><td>{{ row.get_status_display }}</td><td>{% if row.accepted is None %}—{% elif row.accepted %}Yes{% else %}No{% endif %}</td><td>{{ row.description|default:'—' }}</td></tr>{% empty %}<tr><td colspan="5">No attendance records.</td></tr>{% endfor %}</tbody></table></div></div>
+{% endblock content %}

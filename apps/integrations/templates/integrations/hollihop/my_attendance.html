@@ -1,0 +1,14 @@
+{% extends 'template.html' %}
+{% block title-main %}My Attendance{% endblock title-main %}
+{% block content %}
+<div style="max-width:1000px;margin:0 auto;padding:10px 0 40px">
+  <h2>Attendance</h2>
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0">
+    <div class="card" style="padding:18px"><small>Present</small><h3>{{ totals.present|default:0 }}</h3></div>
+    <div class="card" style="padding:18px"><small>Absent</small><h3>{{ totals.absent|default:0 }}</h3></div>
+    <div class="card" style="padding:18px"><small>Attendance rate</small><h3>{% if totals.percentage is not None %}{{ totals.percentage }}%{% else %}—{% endif %}</h3></div>
+  </div>
+  <div style="overflow-x:auto"><table class="table"><thead><tr><th>Date</th><th>Classroom</th><th>Status</th><th>Comment</th></tr></thead><tbody>{% for row in records %}<tr><td>{{ row.date }}</td><td>{{ row.classroom.name }}</td><td>{{ row.get_status_display }}</td><td>{{ row.description|default:'—' }}</td></tr>{% empty %}<tr><td colspan="4">No Hollihop attendance has been synced yet.</td></tr>{% endfor %}</tbody></table></div>
+</div>
+<style>@media(max-width:620px){div[style*="grid-template-columns:repeat(3"]{grid-template-columns:1fr!important}}</style>
+{% endblock content %}

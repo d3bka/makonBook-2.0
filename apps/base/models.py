@@ -60,6 +60,17 @@ class UserProfile(models.Model):
         default=35,
         help_text="Time limit for Math section in minutes (default: 35)"
     )
+    middle_name = models.CharField(max_length=150, blank=True)
+    phone_number = models.CharField(max_length=32, null=True, blank=True, unique=True)
+    hollihop_client_id = models.BigIntegerField(null=True, blank=True, unique=True)
+    hollihop_teacher_id = models.BigIntegerField(null=True, blank=True, unique=True)
+    hollihop_employee_id = models.BigIntegerField(null=True, blank=True, unique=True)
+    hollihop_status = models.CharField(max_length=150, blank=True)
+    hollihop_created = models.BooleanField(default=False)
+    must_change_password = models.BooleanField(default=False)
+    credentials_delivery_status = models.CharField(max_length=30, default="not_applicable", db_index=True)
+    credentials_last_sent_at = models.DateTimeField(null=True, blank=True)
+    hollihop_last_synced_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
