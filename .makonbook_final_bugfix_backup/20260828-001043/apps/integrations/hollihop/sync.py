@@ -1101,16 +1101,30 @@ class HollihopSyncEngine:
 
     def sync_teachers(self, *, only_teacher_id=None):
         selected = None if only_teacher_id else self._selected_teacher_ids()
-        teachers = self.client.get_teachers(teacher_id=only_teacher_id)
-        # Keep the bulk payload available for dependency resolution later in the
-        # same run. Hollihop support warns against uncontrolled repeated API
+
+        # A dry-run deliberately does not persist teachers in UserProfile.
+        # If a targeted dependency was already processed earlier in this run,
+        # treat the virtual teacher as present instead of fetching/counting it
+        # again. This keeps dry-run counts and API traffic representative of live
+        # behaviour.
+        if only_teacher_id is not None:
+            only_teacher_id = int(only_teacher_id)
+            if self.dry_run and only_teacher_id in self._dry_run_teacher_ids:
+                return self.summary
+            cached = self._teacher_payload_cache_by_id.get(only_teacher_id)
+            teachers = [cached] if cached is not None else self.client.get_teachers(teacher_id=only_teacher_id)
+        else:
+            teachers = self.client.get_teachers()
+
+        # Keep the bulk/targeted payload available for dependency resolution later
+        # in the same run. Hollihop support warns against uncontrolled repeated API
         # requests; a cached teacher is enough for classroom dependency sync.
         for row in teachers:
             try:
                 self._teacher_payload_cache_by_id[int(row.get("Id"))] = row
             except (TypeError, ValueError):
                 continue
-        if only_teacher_id is not None and not self._teacher_is_selected(int(only_teacher_id)):
+        if only_teacher_id is not None and not self._teacher_is_selected(only_teacher_id):
             teachers = []
         elif selected is not None:
             teachers = [t for t in teachers if int(t.get("Id") or 0) in selected]
@@ -1233,24 +1247,35 @@ class HollihopSyncEngine:
         """Create/link a missing teacher only when an allowed classroom needs it.
 
         Smart reconciliation uses this dependency fetch instead of repeatedly
-        importing every Hollihop teacher before every classroom change.
+        importing every Hollihop teacher before every classroom change. During
+        dry-run, successfully processed teachers live only in the in-memory
+        virtual set, so dependency checks must consult that set before the DB.
         """
         teacher_id = int(teacher_id)
         existing = User.objects.filter(profile__hollihop_teacher_id=teacher_id).first()
         if existing:
             return existing
-        rows = self.client.get_teachers(teacher_id=teacher_id)
+
+        # In dry-run there is intentionally no UserProfile row to find. Without
+        # this guard every classroom referencing the same teacher re-fetches and
+        # re-counts that teacher.
+        if self.dry_run and teacher_id in self._dry_run_teacher_ids:
+            return None
+
+        cached = self._teacher_payload_cache_by_id.get(teacher_id)
+        rows = [cached] if cached is not None else self.client.get_teachers(teacher_id=teacher_id)
         if not rows:
             return None
-        self.summary.teachers_found += len(rows)
-        for data in rows[:1]:
-            try:
-                with transaction.atomic():
-                    self._sync_teacher(data)
-            except Exception as exc:
-                self.summary.errors += 1
-                self._log("sync_error", entity_type="teacher", external_id=teacher_id, details={"error": type(exc).__name__})
-                return None
+        self.summary.teachers_found += 1
+        data = rows[0]
+        self._teacher_payload_cache_by_id[teacher_id] = data
+        try:
+            with transaction.atomic():
+                self._sync_teacher(data)
+        except Exception as exc:
+            self.summary.errors += 1
+            self._log("sync_error", entity_type="teacher", external_id=teacher_id, details={"error": type(exc).__name__})
+            return None
         return User.objects.filter(profile__hollihop_teacher_id=teacher_id).first()
 
     def ensure_classroom(self, edunit_id: int):

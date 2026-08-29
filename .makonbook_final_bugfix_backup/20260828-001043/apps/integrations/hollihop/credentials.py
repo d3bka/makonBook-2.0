@@ -84,8 +84,6 @@ def deliver_new_temporary_access(user) -> HollihopCredentialDelivery:
         return delivery
 
     temporary_password = generate_temporary_password()
-    previous_password_hash = user.password
-    previous_must_change_password = bool(profile.must_change_password)
     user.set_password(temporary_password)
     user.save(update_fields=["password"])
     profile.must_change_password = True
@@ -167,21 +165,11 @@ def deliver_new_temporary_access(user) -> HollihopCredentialDelivery:
     else:
         delivery.overall_status = "failed"
         profile.credentials_delivery_status = "failed"
-        # No channel received the newly generated password. Leaving that hash in
-        # place would lock an existing user out (or make a new user's password
-        # unknowable). Restore the previous authentication state atomically at
-        # the model level; a later retry can generate a fresh temporary password.
-        user.password = previous_password_hash
-        user.save(update_fields=["password"])
-        profile.must_change_password = previous_must_change_password
 
     delivery.completed_at = timezone.now()
     delivery.save(update_fields=[
         "email_status", "sms_status", "email_error_safe", "sms_error_safe", "overall_status", "completed_at"
     ])
-    update_fields = ["must_change_password", "credentials_delivery_status", "updated_at"]
-    if sent_count:
-        profile.credentials_last_sent_at = timezone.now()
-        update_fields.append("credentials_last_sent_at")
-    profile.save(update_fields=update_fields)
+    profile.credentials_last_sent_at = timezone.now()
+    profile.save(update_fields=["must_change_password", "credentials_delivery_status", "credentials_last_sent_at", "updated_at"])
     return delivery

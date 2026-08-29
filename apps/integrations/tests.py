@@ -51,7 +51,16 @@ class FakeHollihopClient:
             rows = [r for r in rows if int(r["Id"]) == int(teacher_id)]
         return [dict(r) for r in rows]
 
-    def get_ed_units(self, *, edunit_id=None, corporative=None, statuses=None, last_updated_from=None):
+    def get_ed_units(
+        self,
+        *,
+        edunit_id=None,
+        corporative=None,
+        statuses=None,
+        last_updated_from=None,
+        learning_types=None,
+        teacher_id=None,
+    ):
         rows = self.edunits
         if edunit_id is not None:
             rows = [r for r in rows if int(r["Id"]) == int(edunit_id)]
@@ -60,6 +69,28 @@ class FakeHollihopClient:
         if statuses:
             active = {"Reserve", "Forming", "Working"}
             rows = [r for r in rows if r.get("_status", "Working") in active]
+        if learning_types:
+            if isinstance(learning_types, str):
+                allowed_learning_types = {item.strip().casefold() for item in learning_types.split(",") if item.strip()}
+            else:
+                allowed_learning_types = {str(item).strip().casefold() for item in learning_types if str(item).strip()}
+            rows = [
+                r for r in rows
+                if str(r.get("LearningType") or "").strip().casefold() in allowed_learning_types
+            ]
+        if teacher_id is not None:
+            teacher_id = int(teacher_id)
+
+            def has_teacher(row):
+                direct_ids = row.get("TeacherIds") or []
+                schedule_ids = [
+                    item
+                    for schedule in (row.get("ScheduleItems") or [])
+                    for item in (schedule.get("TeacherIds") or [])
+                ]
+                return teacher_id in {int(item) for item in [*direct_ids, *schedule_ids]}
+
+            rows = [r for r in rows if has_teacher(r)]
         return [dict(r) for r in rows]
 
     def get_ed_unit_students(self, *, edunit_id=None, student_client_id=None, corporative=None, date_from=None, date_to=None, query_days=False):
@@ -81,6 +112,10 @@ class FakeHollihopClient:
 
 BASE_SETTINGS = dict(
     HOLLIHOP_MODE="all",
+    # These are generic sync-behaviour tests. LearningType scoping has its own
+    # production path and must not silently change the legacy fixtures, most of
+    # which intentionally omit LearningType/relationship metadata.
+    HOLLIHOP_ALLOWED_LEARNING_TYPES=(),
     HOLLIHOP_ACTIVE_STUDENT_STATUSES={"active"},
     HOLLIHOP_INACTIVE_STUDENT_STATUSES={"inactive"},
     HOLLIHOP_FALLBACK_TEACHER_USERNAME="",
@@ -500,6 +535,18 @@ class HollihopSyncTests(TestCase):
             {"Id": 14, "Name": "Class A", "Corporative": False, "ScheduleItems": [{"TeacherIds": [50]}], "_status": "Working"},
             {"Id": 15, "Name": "Class B", "Corporative": False, "ScheduleItems": [{"TeacherIds": [50]}], "_status": "Working"},
         ]
+        # Full classroom reconciliation intentionally materializes only the
+        # current Hollihop graph: an active EdUnit must have at least one
+        # current, non-inactive student relation. Seed that graph here instead
+        # of relying on the pre-v48 behaviour that imported empty EdUnits.
+        self.api.students = [
+            self.student(9014, email="fixture14@example.com"),
+            self.student(9015, email="fixture15@example.com"),
+        ]
+        self.api.relations = [
+            {"EdUnitId": 14, "StudentClientId": 9014, "Status": "Normal", "EdUnitCorporative": False},
+            {"EdUnitId": 15, "StudentClientId": 9015, "Status": "Normal", "EdUnitCorporative": False},
+        ]
         HollihopSyncEngine(client=self.api).sync_teachers()
         HollihopSyncEngine(client=self.api).sync_classrooms()
 
@@ -583,6 +630,10 @@ class HollihopSyncTests(TestCase):
             self.student(81, email="regular@example.com"),
             self.student(82, email="corporate@example.com"),
         ]
+        self.api.edunits = [
+            {"Id": 1, "Name": "Regular", "Corporative": False, "_status": "Working"},
+            {"Id": 2, "Name": "Corporate", "Corporative": True, "_status": "Working"},
+        ]
         self.api.relations = [
             {"EdUnitId": 1, "StudentClientId": 81, "EdUnitCorporative": False, "Status": "Normal"},
             {"EdUnitId": 2, "StudentClientId": 82, "EdUnitCorporative": True, "Status": "Normal"},
@@ -620,8 +671,13 @@ class HollihopSyncTests(TestCase):
         self.assertEqual(delivery.overall_status, "failed")
         self.assertEqual(delivery.email_status, "failed")
         self.assertIn("Email provider error", delivery.email_error_safe)
-        self.assertTrue(user.has_usable_password())
-        self.assertTrue(user.profile.must_change_password)
+        # No delivery channel received the generated secret. The safe behaviour
+        # is to restore the previous authentication state rather than leave an
+        # unreachable password hash on the account. A later retry generates a
+        # fresh temporary password.
+        self.assertFalse(user.has_usable_password())
+        self.assertFalse(user.profile.must_change_password)
+        self.assertEqual(user.profile.credentials_delivery_status, "failed")
 
     def test_ignored_conflict_stays_ignored_on_later_sync(self):
         first = User.objects.create_user("holli-ignore-email", email="ignore@example.com", password="x")

@@ -167,7 +167,7 @@ class Command(BaseCommand):
             if date_from > date_to:
                 raise CommandError("--from must be before or equal to --to.")
 
-        self.stdout.write(self.style.MIGRATE_HEADING("Hollihop → MakonBook sync"))
+        self.stdout.write(self.style.MIGRATE_HEADING("Hollihop -> MakonBook sync"))
         self.stdout.write(f"Mode: {settings.HOLLIHOP_MODE}")
         self.stdout.write(f"Scope: {scope if using_env_scope else 'CLI override'}")
         self.stdout.write(f"Pilot: {'YES' if pilot_mode else 'NO'}")
@@ -183,7 +183,7 @@ class Command(BaseCommand):
         self.stdout.write(f"Dry run: {'YES' if dry_run else 'NO'}")
         self.stdout.write(f"Send credentials: {'YES' if send_credentials else 'NO'}")
         if "attendance" in stages or pilot_mode:
-            self.stdout.write(f"Attendance range: {date_from} → {date_to}")
+            self.stdout.write(f"Attendance range: {date_from} -> {date_to}")
 
         try:
             engine = HollihopSyncEngine(dry_run=dry_run, send_credentials=send_credentials)

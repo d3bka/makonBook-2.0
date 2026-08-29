@@ -178,7 +178,7 @@ def sync_resolved_classroom_mapping(edunit_id):
 
 
 @shared_task(name="apps.integrations.hollihop.tasks.process_student_webhook")
-def process_student_webhook(trigger_type, client_id, attempt=0):
+def process_student_webhook(trigger_type, client_id):
     if not _integration_enabled():
         return {"status": "disabled"}
     # Webhooks must not bootstrap an uninitialized local/test database. The
@@ -190,18 +190,9 @@ def process_student_webhook(trigger_type, client_id, attempt=0):
     try:
         engine.acquire_lock()
     except HollihopSyncAlreadyRunning:
-        # Do not silently lose an event just because a long initial/manual sync
-        # owns the lock. Student membership changes are not represented by
-        # EdUnit.lastUpdated, so queue a few bounded retries in addition to the
-        # periodic reconciliation safety net.
-        attempt = int(attempt or 0)
-        if attempt < 5:
-            process_student_webhook.apply_async(
-                args=[trigger_type, client_id, attempt + 1],
-                countdown=min(300, 60 * (attempt + 1)),
-            )
-            return {"status": "retry_queued", "attempt": attempt + 1}
-        return {"status": "busy", "attempt": attempt}
+        # The 5-minute smart reconciliation is the safety net for an event that
+        # arrives while another sync owns the lock.
+        return {"status": "busy"}
 
     try:
         client_id = int(client_id)
@@ -215,10 +206,7 @@ def process_student_webhook(trigger_type, client_id, attempt=0):
             require_active_student=False,
         )
         existing = UserProfile.objects.filter(hollihop_client_id=client_id).exists()
-        if rows and (relations or existing):
-            # Existing users continue receiving contact/status changes after
-            # leaving their last GROUP. Only unknown ONLINE/no-GROUP users are
-            # prevented from bootstrapping a new MakonBook account.
+        if rows and relations:
             engine.summary.students_found += 1
             with transaction.atomic():
                 engine._sync_student(rows[0])

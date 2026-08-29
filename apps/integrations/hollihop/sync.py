@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 import os
+import time
 import uuid
 
 from django.conf import settings
@@ -22,6 +23,22 @@ from .credentials import can_deliver_temporary_access, deliver_new_temporary_acc
 from .normalization import normalize_email, normalize_phone, safe_text
 
 User = get_user_model()
+
+
+def hollihop_bool(value, *, default=False):
+    """Parse Hollihop boolean fields without treating the string 'false' as True."""
+    if isinstance(value, bool):
+        return value
+    if value is None or value == "":
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value).strip().casefold()
+    if text in {"1", "true", "yes", "y", "on", "да"}:
+        return True
+    if text in {"0", "false", "no", "n", "off", "нет"}:
+        return False
+    return default
 
 
 class HollihopSyncAlreadyRunning(RuntimeError):
@@ -66,6 +83,7 @@ class HollihopSyncEngine:
         self.send_credentials = bool(send_credentials) and not self.dry_run
         self.summary = SyncSummary()
         self._lock_token = None
+        self._next_lock_heartbeat_at = 0.0
         # Dry-run must model objects that *would* be created by earlier stages.
         # Without this virtual state, a new teacher is intentionally not written
         # to the DB, then the Classroom stage falsely reports that the EdUnit has
@@ -227,6 +245,33 @@ class HollihopSyncEngine:
             state.last_error_safe = ""
             state.save()
 
+    def heartbeat_lock(self, *, force=False):
+        """Extend the DB sync lease while a long import is still healthy.
+
+        Initial sync can legitimately run longer than HOLLIHOP_SYNC_LOCK_MINUTES.
+        Without a heartbeat, Celery/another operator could acquire the expired
+        lease and run a second reconciliation against the same database.
+        """
+        if self.dry_run or not self._lock_token:
+            return
+        now_monotonic = time.monotonic()
+        if not force and now_monotonic < self._next_lock_heartbeat_at:
+            return
+        now = timezone.now()
+        updated = HollihopSyncState.objects.filter(
+            provider="hollihop", lock_token=self._lock_token
+        ).update(
+            lock_expires_at=now + timedelta(minutes=settings.HOLLIHOP_SYNC_LOCK_MINUTES)
+        )
+        if updated != 1:
+            raise HollihopSyncAlreadyRunning(
+                "Hollihop synchronization lost ownership of its lock; aborting to prevent concurrent writes."
+            )
+        # Refresh at least every five minutes and at roughly one third of a
+        # shorter configured lease. This keeps DB writes negligible.
+        interval = max(30.0, min(300.0, settings.HOLLIHOP_SYNC_LOCK_MINUTES * 20.0))
+        self._next_lock_heartbeat_at = now_monotonic + interval
+
     def release_lock(self, *, success=True, partial=False, error=""):
         if self.dry_run or not self._lock_token:
             return
@@ -255,18 +300,25 @@ class HollihopSyncEngine:
         self.acquire_lock()
         error_message = ""
         try:
+            self.heartbeat_lock(force=True)
             if "managers" in stages:
                 self.sync_managers()
+                self.heartbeat_lock(force=True)
             if "teachers" in stages:
                 self.sync_teachers()
+                self.heartbeat_lock(force=True)
             if "students" in stages:
                 self.sync_students()
+                self.heartbeat_lock(force=True)
             if "classrooms" in stages:
                 self.sync_classrooms()
+                self.heartbeat_lock(force=True)
             if "memberships" in stages:
                 self.sync_memberships()
+                self.heartbeat_lock(force=True)
             if "attendance" in stages:
                 self.sync_attendance(date_from=date_from, date_to=date_to)
+                self.heartbeat_lock(force=True)
             self.release_lock(success=self.summary.errors == 0, partial=self.summary.errors > 0)
             return self.summary
         except Exception as exc:
@@ -651,7 +703,7 @@ class HollihopSyncEngine:
             employee_id = 0
         if employee_id and employee_id in cls._manager_employee_ids():
             return True
-        if data.get("IsAdmin") is True or data.get("IsAdministrator") is True:
+        if hollihop_bool(data.get("IsAdmin")) or hollihop_bool(data.get("IsAdministrator")):
             return True
         # Some Hollihop deployments expose role/type fields even though the
         # public schema does not guarantee them. Keep supporting those explicit
@@ -710,6 +762,7 @@ class HollihopSyncEngine:
         return self.summary
 
     def _sync_manager(self, data):
+        self.heartbeat_lock()
         employee_id = int(data["Id"])
         first = safe_text(data.get("FirstName"), 150)
         last = safe_text(data.get("LastName"), 150)
@@ -718,7 +771,7 @@ class HollihopSyncEngine:
         email = normalize_email(data.get("EMail"))
         phone = normalize_phone(data.get("Mobile") or data.get("Phone"))
         status = safe_text(data.get("Status"), 150)
-        active = not bool(data.get("Fired"))
+        active = not hollihop_bool(data.get("Fired"))
         user, match = self._match_user(
             external_kind="manager", external_id=employee_id,
             email=email, phone=phone, display_name=display,
@@ -1017,6 +1070,7 @@ class HollihopSyncEngine:
         return self.summary
 
     def _sync_student(self, data):
+        self.heartbeat_lock()
         client_id = int(data["ClientId"])
         first = safe_text(data.get("FirstName"), 150)
         last = safe_text(data.get("LastName"), 150)
@@ -1139,6 +1193,7 @@ class HollihopSyncEngine:
         return self.summary
 
     def _sync_teacher(self, data):
+        self.heartbeat_lock()
         teacher_id = int(data["Id"])
         first = safe_text(data.get("FirstName"), 150)
         last = safe_text(data.get("LastName"), 150)
@@ -1147,7 +1202,7 @@ class HollihopSyncEngine:
         email = normalize_email(data.get("EMail"))
         phone = normalize_phone(data.get("Mobile") or data.get("Phone"))
         status = safe_text(data.get("Status"), 150)
-        active = not bool(data.get("Fired"))
+        active = not hollihop_bool(data.get("Fired"))
         user, match = self._match_user(external_kind="teacher", external_id=teacher_id, email=email, phone=phone, display_name=display)
         if match == "conflict":
             return
@@ -1413,6 +1468,7 @@ class HollihopSyncEngine:
         return self.summary
 
     def _sync_classroom(self, data, *, active_ids):
+        self.heartbeat_lock()
         if not self._learning_type_allowed(data.get("LearningType")):
             return
         edunit_id = int(data["Id"])
@@ -1426,11 +1482,15 @@ class HollihopSyncEngine:
             fallback = User.objects.filter(username=settings.HOLLIHOP_FALLBACK_TEACHER_USERNAME).first()
         manual_teacher = self._resolved_classroom_teacher(edunit_id)
 
+        # External EdUnit ID is authoritative. A same-name manual classroom is
+        # only a *candidate* and must never be silently taken over merely because
+        # the text matches (different teachers often reuse names like PRE SAT MATH).
         classroom = Classroom.objects.filter(hollihop_edunit_id=edunit_id).first()
+        name_candidate = None
         if classroom is None:
             by_name = list(Classroom.objects.filter(name__iexact=name)[:3])
             if len(by_name) == 1:
-                classroom = by_name[0]
+                name_candidate = by_name[0]
             elif len(by_name) > 1:
                 self._conflict(
                     external_type="classroom", external_id=edunit_id, display_name=name,
@@ -1443,12 +1503,26 @@ class HollihopSyncEngine:
         # teacher stage as available virtual teachers, so the preview reflects
         # what a live run will actually do.
         virtual_teacher_ids = [x for x in teacher_ids if x in self._dry_run_teacher_ids]
-        primary_teacher = (
-            ordered_teachers[0]
-            if ordered_teachers
-            else manual_teacher
-            or (classroom.teacher if classroom else fallback)
-        )
+        confirmed_teacher = ordered_teachers[0] if ordered_teachers else manual_teacher or fallback
+
+        if classroom is None and name_candidate is not None:
+            externally_confirmed_user_ids = {u.id for u in ordered_teachers}
+            if manual_teacher is not None:
+                externally_confirmed_user_ids.add(manual_teacher.id)
+            if name_candidate.teacher_id in externally_confirmed_user_ids:
+                classroom = name_candidate
+            else:
+                self._conflict(
+                    external_type="classroom", external_id=edunit_id, display_name=name,
+                    reason=(
+                        "A manual MakonBook classroom has the same name, but Hollihop does not confirm the same teacher. "
+                        "Automatic takeover was refused; resolve the mapping explicitly if they are the same classroom."
+                    ),
+                    candidate_ids=[name_candidate.teacher_id],
+                )
+                return
+
+        primary_teacher = confirmed_teacher or (classroom.teacher if classroom and classroom.hollihop_managed else None)
         if primary_teacher is None and not (self.dry_run and virtual_teacher_ids):
             self._conflict(
                 external_type="classroom", external_id=edunit_id, display_name=name,
@@ -1473,7 +1547,7 @@ class HollihopSyncEngine:
         classroom_changed = created
         desired_description = safe_text(data.get("Description"), 2000)
         desired_active = edunit_id in active_ids
-        desired_corporative = bool(data.get("Corporative"))
+        desired_corporative = hollihop_bool(data.get("Corporative"))
         if created:
             classroom = Classroom.objects.create(
                 teacher=primary_teacher,
@@ -1614,6 +1688,7 @@ class HollihopSyncEngine:
         seen = set()
 
         for data in relations:
+            self.heartbeat_lock()
             try:
                 edunit_id = int(data.get("EdUnitId"))
                 client_id = int(data.get("StudentClientId"))
@@ -1713,9 +1788,32 @@ class HollihopSyncEngine:
         if only_edunit_id is not None:
             managed = managed.filter(classroom__hollihop_edunit_id=only_edunit_id)
 
-        for membership in managed:
-            if (membership.classroom_id, membership.user_id) in seen or membership.status == "removed":
-                continue
+        active_managed = [membership for membership in managed if membership.status != "removed"]
+        removal_candidates = [
+            membership for membership in active_managed
+            if (membership.classroom_id, membership.user_id) not in seen
+        ]
+
+        # A malformed/truncated HTTP-200 response must never translate into
+        # "remove every Hollihop student from MakonBook". Guard only full-account
+        # reconciliation; targeted one-student/one-EdUnit syncs are intentionally
+        # allowed to remove their small exact scope.
+        if only_student_client_id is None and only_edunit_id is None and active_managed:
+            removal_count = len(removal_candidates)
+            total_count = len(active_managed)
+            removal_ratio = removal_count / total_count
+            min_population = int(getattr(settings, "HOLLIHOP_MEMBERSHIP_REMOVAL_GUARD_MIN_POPULATION", 50))
+            max_removals = int(getattr(settings, "HOLLIHOP_MAX_AUTOMATIC_MEMBERSHIP_REMOVALS", 500))
+            max_ratio = float(getattr(settings, "HOLLIHOP_MAX_AUTOMATIC_MEMBERSHIP_REMOVAL_RATIO", 0.35))
+            if total_count >= min_population and (removal_count > max_removals or removal_ratio > max_ratio):
+                raise HollihopError(
+                    "Membership reconciliation aborted by safety guard: "
+                    f"{removal_count}/{total_count} ({removal_ratio:.1%}) existing managed memberships "
+                    "would be removed. Verify Hollihop API data before retrying or raise the explicit safety limits."
+                )
+
+        for membership in removal_candidates:
+            self.heartbeat_lock()
             if self.dry_run:
                 self.summary.memberships_removed += 1
                 continue
@@ -1760,6 +1858,7 @@ class HollihopSyncEngine:
         return self.summary
 
     def _sync_attendance_relation(self, rel):
+        self.heartbeat_lock()
         learning_type = safe_text(rel.get("EdUnitLearningType"), 150)
         if learning_type and not self._learning_type_allowed(learning_type):
             return
@@ -1787,7 +1886,7 @@ class HollihopSyncEngine:
                 "student": profile.user if profile else None,
                 "classroom": classroom,
                 "date": day_date,
-                "status": HollihopAttendance.STATUS_ABSENT if bool(day.get("Pass")) else HollihopAttendance.STATUS_PRESENT,
+                "status": HollihopAttendance.STATUS_ABSENT if hollihop_bool(day.get("Pass")) else HollihopAttendance.STATUS_PRESENT,
                 "description": safe_text(day.get("Description"), 1000),
                 "accepted": day.get("Accepted") if isinstance(day.get("Accepted"), bool) else None,
                 "schedule_key": schedule_key,

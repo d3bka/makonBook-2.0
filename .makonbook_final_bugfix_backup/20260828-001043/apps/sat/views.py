@@ -953,10 +953,10 @@ def user_has_test_access(user, test):
 def _test_attempts_open(test_obj, user=None):
     """Return whether an authenticated user may run the test.
 
-    ``Test.is_available`` gates the normal authenticated SAT portal, including
-    classroom teachers and support teachers. Guest Mode is controlled by its
-    GlobalEvent window and remains independent. Only explicit platform QA/admin
-    roles (superuser/staff/Admin/Tester/Manager) may bypass a closed test.
+    ``Test.is_available`` is intentionally a *student portal/classroom* gate.
+    It does not control Guest Mode. Staff-side roles keep QA access so an
+    administrator/manager/teacher can verify a closed Placement Test without
+    reopening it for normal students.
     """
     if not test_obj:
         return False
@@ -969,6 +969,8 @@ def _test_attempts_open(test_obj, user=None):
         or getattr(user, 'is_staff', False)
         or is_member(user, ['Admin', 'Tester'])
         or is_manager(user)
+        or is_teacher(user)
+        or is_support_teacher(user)
     )
 
 
@@ -5553,56 +5555,18 @@ def generate_6_digit_code():
     return f"{random.randint(0, 999999):06d}"
 
 
-def generate_unique_classroom_code(max_attempts=40):
-    """Return a likely-unused six digit code.
-
-    The database unique constraint remains the final authority; callers that
-    persist the code must still retry IntegrityError because another worker can
-    win the race between this lookup and INSERT/UPDATE.
-    """
-    for _ in range(max_attempts):
+def generate_unique_classroom_code():
+    while True:
         code = generate_6_digit_code()
         if not ClassroomJoinCode.objects.filter(code=code).exists():
             return code
-    raise RuntimeError("Could not allocate a classroom join code.")
-
-
-def _cache_get_fail_open(key, default=0):
-    try:
-        return cache.get(key, default)
-    except Exception as exc:
-        logger.warning("Classroom cache read failed; continuing without cache enforcement: %s", type(exc).__name__)
-        return default
-
-
-def _cache_set_fail_open(key, value, timeout):
-    try:
-        cache.set(key, value, timeout=timeout)
-        return True
-    except Exception as exc:
-        logger.warning("Classroom cache write failed; continuing without cache enforcement: %s", type(exc).__name__)
-        return False
-
-
-def _cache_add_fail_open(key, value, timeout):
-    try:
-        return cache.add(key, value, timeout=timeout)
-    except Exception as exc:
-        logger.warning("Classroom cache add failed; continuing without idempotency cache: %s", type(exc).__name__)
-        return True
-
 
 @login_required(login_url='/login/')
 def teacher_classroom_list(request):
     if not is_teacher(request.user):
         return HttpResponseForbidden("Only teachers can access classroom management.")
 
-    # A classroom can have a primary owner plus additional approved teachers.
-    # Secondary teachers must see the classrooms they are explicitly assigned to.
-    classrooms = Classroom.objects.filter(
-        Q(teacher=request.user)
-        | Q(memberships__user=request.user, memberships__role='teacher', memberships__status='approved')
-    ).distinct().order_by('-created_at')
+    classrooms = Classroom.objects.filter(teacher=request.user).order_by('-created_at')
 
     return render(request, 'sat/teacher_classroom_list.html', {
         'classrooms': classrooms,
@@ -5680,7 +5644,6 @@ def create_classroom(request):
         name = request.POST.get('name', '').strip()
         description = request.POST.get('description', '').strip()
         classroom_type = request.POST.get('classroom_type', Classroom.CLASSROOM_TYPE_SAT).strip().lower()
-        submission_token = request.POST.get('submission_token', '').strip()
 
         if classroom_type not in {Classroom.CLASSROOM_TYPE_SAT, Classroom.CLASSROOM_TYPE_AP}:
             messages.error(request, "Choose a valid classroom type.")
@@ -5689,59 +5652,31 @@ def create_classroom(request):
         if not name:
             messages.error(request, "Classroom name is required.")
             return redirect('create_classroom')
-        if len(name) > Classroom._meta.get_field('name').max_length:
-            messages.error(request, "Classroom name is too long.")
-            return redirect('create_classroom')
-        if len(description) > 10000:
-            messages.error(request, "Description is too long (maximum 10,000 characters).")
-            return redirect('create_classroom')
 
-        expected_token = request.session.get('classroom_create_token', '')
-        if not submission_token or not expected_token or submission_token != expected_token:
-            messages.error(request, "This classroom form is stale or was already submitted. Please try again.")
-            return redirect('create_classroom')
+        classroom = Classroom.objects.create(
+            teacher=request.user,
+            name=name,
+            description=description,
+            classroom_type=classroom_type,
+            is_active=True,
+        )
 
-        # cache.add is atomic on Redis and LocMemCache. It protects concurrent
-        # double-clicks while staying fail-open if Redis itself is unavailable.
-        token_key = f"classroom:create:{request.user.pk}:{submission_token}"
-        if not _cache_add_fail_open(token_key, 1, timeout=120):
-            messages.info(request, "This classroom was already submitted.")
-            return redirect('teacher_classroom_list')
-
-        request.session.pop('classroom_create_token', None)
-        try:
-            with transaction.atomic():
-                classroom = Classroom.objects.create(
-                    teacher=request.user,
-                    name=name,
-                    description=description,
-                    classroom_type=classroom_type,
-                    is_active=True,
-                )
-                ClassroomMembership.objects.update_or_create(
-                    classroom=classroom,
-                    user=request.user,
-                    defaults={
-                        'role': 'teacher',
-                        'status': 'approved',
-                        'approved_at': timezone.now(),
-                        'left_at': None,
-                        'removed_at': None,
-                    },
-                )
-        except Exception:
-            logger.exception("Failed to create classroom atomically for user_id=%s", request.user.pk)
-            messages.error(request, "Classroom could not be created. No partial classroom was saved.")
-            return redirect('create_classroom')
+        # create teacher membership automatically
+        ClassroomMembership.objects.get_or_create(
+            classroom=classroom,
+            user=request.user,
+            defaults={
+                'role': 'teacher',
+                'status': 'approved',
+                'approved_at': timezone.now(),
+            }
+        )
 
         messages.success(request, f'Classroom "{classroom.name}" created successfully.')
         return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
 
-    submission_token = uuid.uuid4().hex
-    request.session['classroom_create_token'] = submission_token
     return render(request, 'sat/create_classroom.html', {
         'classroom_type_choices': Classroom.CLASSROOM_TYPE_CHOICES,
-        'submission_token': submission_token,
     })
 
 @login_required(login_url='/login/')
@@ -5771,41 +5706,24 @@ def generate_classroom_join_code(request, classroom_id):
 
     if not can_manage_classroom(request.user, classroom):
         return HttpResponseForbidden("You can manage only your own classrooms.")
-    if not classroom.is_active:
-        messages.error(request, "Join codes cannot be generated for an inactive classroom.")
-        return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
-    if classroom.hollihop_managed:
-        messages.error(request, "Hollihop-managed classrooms receive memberships only from Hollihop.")
-        return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
 
-    for _ in range(40):
-        try:
-            with transaction.atomic():
-                locked = Classroom.objects.select_for_update().get(pk=classroom.pk)
-                if not locked.is_active or locked.hollihop_managed:
-                    messages.error(request, "This classroom no longer accepts manual join codes.")
-                    return redirect('teacher_classroom_dashboard', classroom_id=locked.id)
-                obj = ClassroomJoinCode.objects.select_for_update().filter(classroom=locked).first()
-                code = generate_6_digit_code()
-                expires_at = timezone.now() + timedelta(hours=12)
-                if obj:
-                    obj.code = code
-                    obj.expires_at = expires_at
-                    obj.is_active = True
-                    obj.save(update_fields=['code', 'expires_at', 'is_active'])
-                else:
-                    ClassroomJoinCode.objects.create(
-                        classroom=locked, code=code, expires_at=expires_at, is_active=True
-                    )
-            messages.success(request, f"New join code generated for {classroom.name}.")
-            return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
-        except IntegrityError:
-            # Another classroom got the same six-digit code first. Retry with a
-            # fresh value instead of surfacing a production 500.
-            continue
+    old_code = ClassroomJoinCode.objects.filter(classroom=classroom).first()
+    if old_code:
+        old_code.is_active = False
+        old_code.save(update_fields=['is_active'])
 
-    logger.error("Unable to allocate unique classroom join code after retries for classroom_id=%s", classroom.id)
-    messages.error(request, "Could not generate a unique join code. Please try again.")
+    new_code = generate_unique_classroom_code()
+
+    ClassroomJoinCode.objects.update_or_create(
+        classroom=classroom,
+        defaults={
+            'code': new_code,
+            'expires_at': timezone.now() + timedelta(hours=12),
+            'is_active': True,
+        }
+    )
+
+    messages.success(request, f"New join code generated for {classroom.name}.")
     return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
 
 def get_user_approved_student_memberships(user):
@@ -5849,25 +5767,16 @@ def get_client_ip(request):
 
 def is_join_code_rate_limited(request):
     ip = get_client_ip(request)
-    user_limit = int(getattr(settings, 'CLASSROOM_JOIN_USER_MAX_ATTEMPTS', 10))
-    ip_limit = int(getattr(settings, 'CLASSROOM_JOIN_IP_MAX_ATTEMPTS', 100))
-    user_key = f"classroom_join_attempts:user:{request.user.pk}"
-    ip_key = f"classroom_join_attempts:ip:{ip}"
-    return (
-        _cache_get_fail_open(user_key, 0) >= user_limit
-        or _cache_get_fail_open(ip_key, 0) >= ip_limit
-    )
+    key = f"classroom_join_attempts:{ip}"
+    attempts = cache.get(key, 0)
+    return attempts >= 5
 
 
 def register_join_code_attempt(request):
     ip = get_client_ip(request)
-    timeout = int(getattr(settings, 'CLASSROOM_JOIN_RATE_WINDOW_SECONDS', 600))
-    for key in (
-        f"classroom_join_attempts:user:{request.user.pk}",
-        f"classroom_join_attempts:ip:{ip}",
-    ):
-        attempts = _cache_get_fail_open(key, 0)
-        _cache_set_fail_open(key, attempts + 1, timeout=timeout)
+    key = f"classroom_join_attempts:{ip}"
+    attempts = cache.get(key, 0)
+    cache.set(key, attempts + 1, timeout=600)  # 10 minutes
 
 def _student_goal_form_context(user, *, form=None, next_url=None):
     goal, _ = StudentGoalProfile.objects.select_related('dream_university').get_or_create(user=user)
@@ -6035,16 +5944,12 @@ def classroom_entry(request):
     return render(request, 'sat/classroom_join.html', context)
 
 @login_required(login_url='/login/')
-@require_POST
 def submit_classroom_join_request(request):
-    # Staff-side roles should never create a student membership accidentally.
-    if (
-        is_teacher(request.user)
-        or is_manager(request.user)
-        or role_is_platform_admin(request.user)
-        or is_support_teacher(request.user)
-    ):
-        return HttpResponseForbidden("Staff accounts cannot submit classroom join requests.")
+    if request.method != 'POST':
+        return redirect('sat_menu')
+
+    if is_teacher(request.user):
+        return HttpResponseForbidden("Teachers cannot submit classroom join requests.")
 
     if is_join_code_rate_limited(request):
         messages.error(request, "Too many code attempts. Please wait and try again later.")
@@ -6059,9 +5964,7 @@ def submit_classroom_join_request(request):
 
     join_code = ClassroomJoinCode.objects.filter(
         code=code,
-        is_active=True,
-        classroom__is_active=True,
-        classroom__hollihop_managed=False,
+        is_active=True
     ).select_related('classroom').first()
 
     if not join_code or not join_code.is_valid():
@@ -6069,54 +5972,37 @@ def submit_classroom_join_request(request):
         messages.error(request, "Invalid or expired classroom code.")
         return redirect('sat_menu')
 
-    classroom = join_code.classroom
-    with transaction.atomic():
-        membership = ClassroomMembership.objects.select_for_update().filter(
-            classroom=classroom, user=request.user
-        ).first()
-        created = False
-        if membership is None:
-            try:
-                # Nested savepoint lets us recover from a concurrent UNIQUE
-                # winner without poisoning the outer transaction on PostgreSQL.
-                with transaction.atomic():
-                    membership = ClassroomMembership.objects.create(
-                        classroom=classroom,
-                        user=request.user,
-                        role='student',
-                        status='pending',
-                    )
-                    created = True
-            except IntegrityError:
-                membership = ClassroomMembership.objects.select_for_update().get(
-                    classroom=classroom, user=request.user
-                )
+    membership, created = ClassroomMembership.objects.get_or_create(
+        classroom=join_code.classroom,
+        user=request.user,
+        defaults={
+            'role': 'student',
+            'status': 'pending',
+        }
+    )
 
-        # Never mutate a staff membership into a student membership.
-        if membership.role != 'student':
-            return HttpResponseForbidden("This account already has a staff role in the classroom.")
+    if not created:
+        if membership.status == 'approved':
+            messages.error(request, "You are already enrolled in this classroom.")
+        elif membership.status == 'pending':
+            messages.info(request, "Your request is already pending for this classroom.")
+        elif membership.status in ['rejected', 'left', 'removed']:
+            membership.status = 'pending'
+            membership.requested_at = timezone.now()
+            membership.approved_at = None
+            membership.left_at = None
+            membership.removed_at = None
+            membership.save(update_fields=[
+                'status',
+                'requested_at',
+                'approved_at',
+                'left_at',
+                'removed_at',
+            ])
+            messages.success(request, "Your join request has been submitted again.")
+        return redirect('sat_menu')
 
-        if not created:
-            if membership.status == 'approved':
-                messages.error(request, "You are already enrolled in this classroom.")
-            elif membership.status == 'pending':
-                messages.info(request, "Your request is already pending for this classroom.")
-            elif membership.status in ['rejected', 'left', 'removed']:
-                if membership.hollihop_managed:
-                    messages.error(request, "This membership is managed by Hollihop and cannot be re-requested manually.")
-                else:
-                    membership.status = 'pending'
-                    membership.requested_at = timezone.now()
-                    membership.approved_at = None
-                    membership.left_at = None
-                    membership.removed_at = None
-                    membership.save(update_fields=[
-                        'status', 'requested_at', 'approved_at', 'left_at', 'removed_at',
-                    ])
-                    messages.success(request, "Your join request has been submitted again.")
-            return redirect('sat_menu')
-
-    messages.success(request, f'Join request sent to classroom "{classroom.name}".')
+    messages.success(request, f'Join request sent to classroom "{join_code.classroom.name}".')
     return redirect('sat_menu')
 
 @login_required(login_url='/login/')
@@ -6169,91 +6055,69 @@ def classroom_join_requests(request, classroom_id):
     })
 
 @login_required(login_url='/login/')
-@require_POST
 def approve_join_request(request, classroom_id, membership_id):
     classroom = get_object_or_404(Classroom, id=classroom_id)
 
     if not can_manage_classroom(request.user, classroom):
         return HttpResponseForbidden("You can manage only your own classrooms.")
-    if classroom.hollihop_managed:
-        messages.error(request, "Hollihop-managed classroom memberships cannot be approved manually.")
+
+    if request.method != 'POST':
+        messages.error(request, "Approving join requests requires POST.")
         return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
 
-    with transaction.atomic():
-        membership = get_object_or_404(
-            ClassroomMembership.objects.select_for_update(),
-            id=membership_id, classroom=classroom, role='student',
+    membership = get_object_or_404(
+        ClassroomMembership,
+        id=membership_id,
+        classroom=classroom,
+        role='student',
+        status='pending'
+    )
+
+    membership.status = 'approved'
+    membership.approved_at = timezone.now()
+    membership.left_at = None
+    membership.removed_at = None
+    membership.save(update_fields=['status', 'approved_at', 'left_at', 'removed_at'])
+
+    for section in ['practice_tests', 'vocabulary', 'admissions']:
+        StudentSectionAccess.objects.get_or_create(
+            membership=membership,
+            section=section,
+            defaults={'has_access': False}
         )
-        if membership.hollihop_managed:
-            messages.error(request, "This membership is managed by Hollihop.")
-            return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
-        if membership.status == 'approved':
-            messages.info(request, f"{membership.user.username} is already approved.")
-            return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
-        if membership.status != 'pending':
-            messages.error(request, "Only pending join requests can be approved.")
-            return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
-
-        membership.status = 'approved'
-        membership.approved_at = timezone.now()
-        membership.left_at = None
-        membership.removed_at = None
-        membership.save(update_fields=['status', 'approved_at', 'left_at', 'removed_at'])
-
-        for section in ['practice_tests', 'vocabulary', 'admissions']:
-            StudentSectionAccess.objects.get_or_create(
-                membership=membership, section=section, defaults={'has_access': False}
-            )
-
-    # Progress analytics are secondary. A failure here must not make a
-    # successful enrollment look like a failed request to the teacher.
-    try:
-        recalculate_student_progress_for_classroom(classroom, membership.user)
-    except Exception:
-        logger.exception(
-            "Progress recalculation failed after classroom approval classroom_id=%s user_id=%s",
-            classroom.id, membership.user_id,
-        )
-
+    
+    recalculate_student_progress_for_classroom(classroom, membership.user)
+    
     messages.success(request, f"{membership.user.username} has been approved.")
     return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
 
-
 @login_required(login_url='/login/')
-@require_POST
 def reject_join_request(request, classroom_id, membership_id):
     classroom = get_object_or_404(Classroom, id=classroom_id)
 
     if not can_manage_classroom(request.user, classroom):
         return HttpResponseForbidden("You can manage only your own classrooms.")
-    if classroom.hollihop_managed:
-        messages.error(request, "Hollihop-managed classroom memberships cannot be rejected manually.")
+
+    if request.method != 'POST':
+        messages.error(request, "Rejecting join requests requires POST.")
         return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
 
-    with transaction.atomic():
-        membership = get_object_or_404(
-            ClassroomMembership.objects.select_for_update(),
-            id=membership_id, classroom=classroom, role='student',
-        )
-        if membership.hollihop_managed:
-            messages.error(request, "This membership is managed by Hollihop.")
-            return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
-        if membership.status == 'rejected':
-            messages.info(request, f"{membership.user.username}'s request is already rejected.")
-            return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
-        if membership.status != 'pending':
-            messages.error(request, "Only pending join requests can be rejected.")
-            return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
+    membership = get_object_or_404(
+        ClassroomMembership,
+        id=membership_id,
+        classroom=classroom,
+        role='student',
+        status='pending'
+    )
 
-        membership.status = 'rejected'
-        membership.approved_at = None
-        membership.left_at = None
-        membership.removed_at = None
-        membership.save(update_fields=['status', 'approved_at', 'left_at', 'removed_at'])
+    membership.status = 'rejected'
+    membership.approved_at = None
+    membership.left_at = None
+    membership.removed_at = None
+    membership.save(update_fields=['status', 'approved_at', 'left_at', 'removed_at'])
 
     messages.info(request, f"{membership.user.username}'s request was rejected.")
     return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
-
 
 def classroom_access_denied(
     request,
@@ -6836,35 +6700,29 @@ def classroom_vocabulary_practice_quiz_result(request, classroom_id):
 
 
 @login_required(login_url='/login/')
-@require_POST
 def remove_student_from_classroom(request, classroom_id, user_id):
     classroom = get_object_or_404(Classroom, id=classroom_id)
 
     if not can_manage_classroom(request.user, classroom):
         return HttpResponseForbidden("You can manage only your own classrooms.")
-    if classroom.hollihop_managed:
-        messages.error(request, "Hollihop-managed memberships must be changed in Hollihop.")
+
+    if request.method != 'POST':
+        messages.error(request, "Removing a student requires POST.")
         return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
 
-    with transaction.atomic():
-        membership = get_object_or_404(
-            ClassroomMembership.objects.select_for_update(),
-            classroom=classroom, user_id=user_id, role='student',
-        )
-        if membership.hollihop_managed:
-            messages.error(request, "This membership is managed by Hollihop.")
-            return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
-        if membership.status == 'removed':
-            messages.info(request, "Student is already removed from this classroom.")
-            return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
-        if membership.status != 'approved':
-            messages.error(request, "Only approved students can be removed.")
-            return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
-        membership.status = 'removed'
-        membership.approved_at = None
-        membership.removed_at = timezone.now()
-        membership.left_at = None
-        membership.save(update_fields=['status', 'approved_at', 'removed_at', 'left_at'])
+    membership = get_object_or_404(
+        ClassroomMembership,
+        classroom=classroom,
+        user_id=user_id,
+        role='student',
+        status='approved'
+    )
+
+    membership.status = 'removed'
+    membership.approved_at = None
+    membership.removed_at = timezone.now()
+    membership.left_at = None
+    membership.save(update_fields=['status', 'approved_at', 'removed_at', 'left_at'])
 
     messages.success(request, "Student removed from classroom.")
     return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
@@ -6873,25 +6731,19 @@ def remove_student_from_classroom(request, classroom_id, user_id):
 @login_required(login_url='/login/')
 @require_POST
 def leave_classroom(request, classroom_id):
-    with transaction.atomic():
-        membership = get_object_or_404(
-            ClassroomMembership.objects.select_for_update().select_related('classroom'),
-            classroom_id=classroom_id, user=request.user, role='student',
-        )
-        if membership.classroom.hollihop_managed or membership.hollihop_managed:
-            messages.error(request, "This membership is managed by Hollihop. Ask the administrator to update Hollihop.")
-            return redirect('sat_menu')
-        if membership.status == 'left':
-            messages.info(request, "You already left this classroom.")
-            return redirect('sat_menu')
-        if membership.status != 'approved':
-            messages.error(request, "You are not currently enrolled in this classroom.")
-            return redirect('sat_menu')
-        membership.status = 'left'
-        membership.approved_at = None
-        membership.left_at = timezone.now()
-        membership.removed_at = None
-        membership.save(update_fields=['status', 'approved_at', 'left_at', 'removed_at'])
+    membership = get_object_or_404(
+        ClassroomMembership,
+        classroom_id=classroom_id,
+        user=request.user,
+        role='student',
+        status='approved'
+    )
+
+    membership.status = 'left'
+    membership.approved_at = None
+    membership.left_at = timezone.now()
+    membership.removed_at = None
+    membership.save(update_fields=['status', 'approved_at', 'left_at', 'removed_at'])
 
     messages.success(request, "You left the classroom.")
     return redirect('sat_menu')
@@ -7964,9 +7816,6 @@ def delete_classroom(request, classroom_id):
 
     if not can_manage_classroom(request.user, classroom):
         return HttpResponseForbidden("You can delete only your own classrooms.")
-    if classroom.hollihop_managed:
-        messages.error(request, "Hollihop-managed classrooms must be removed in Hollihop.")
-        return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
 
     if request.method != 'POST':
         return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
@@ -8024,9 +7873,6 @@ def edit_classroom(request, classroom_id):
 
     if not can_manage_classroom(request.user, classroom):
         return HttpResponseForbidden("You can edit only your own classrooms.")
-    if classroom.hollihop_managed:
-        messages.error(request, "Hollihop-managed classrooms must be edited in Hollihop.")
-        return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
 
     if request.method != 'POST':
         return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
@@ -8041,12 +7887,6 @@ def edit_classroom(request, classroom_id):
 
     if not name:
         messages.error(request, "Classroom name is required.")
-        return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
-    if len(name) > Classroom._meta.get_field('name').max_length:
-        messages.error(request, "Classroom name is too long.")
-        return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
-    if len(description) > 10000:
-        messages.error(request, "Description is too long (maximum 10,000 characters).")
         return redirect('teacher_classroom_dashboard', classroom_id=classroom.id)
 
     classroom.name = name
@@ -8069,11 +7909,6 @@ def resolve_classroom_and_role(request, classroom_id):
 
     if can_manage_classroom(request.user, classroom):
         return classroom, 'teacher', None, None
-
-    # Inactive classrooms remain visible to their teachers for management and
-    # history, but students must not regain access through a bookmarked URL.
-    if not classroom.is_active:
-        return classroom, None, None, None
 
     membership = ClassroomMembership.objects.filter(
         classroom=classroom,

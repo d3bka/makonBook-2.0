@@ -2,7 +2,7 @@ from pathlib import Path
 import re
 
 from django.conf import settings
-from django.contrib.auth.models import Group, User
+from django.contrib.auth.models import User
 from django.test import Client, SimpleTestCase, TestCase
 from django.urls import NoReverseMatch, reverse
 
@@ -16,8 +16,6 @@ class ClassroomJoinCodeV25Tests(TestCase):
             password="pass123",
             is_staff=True,
         )
-        teacher_group, _ = Group.objects.get_or_create(name="Teacher")
-        self.teacher.groups.add(teacher_group)
         self.classroom = Classroom.objects.create(
             teacher=self.teacher,
             name="Join Code V25",

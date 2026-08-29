@@ -280,12 +280,6 @@ TEST_IMPORT_SUBMIT_COOLDOWN_SECONDS = int(os.getenv("TEST_IMPORT_SUBMIT_COOLDOWN
 TEST_IMPORT_RATE_LIMIT_MAX = int(os.getenv("TEST_IMPORT_RATE_LIMIT_MAX", "6"))
 TEST_IMPORT_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("TEST_IMPORT_RATE_LIMIT_WINDOW_SECONDS", "600"))
 
-# Classroom join-code throttling. Per-user limits stop brute force without
-# locking an entire school behind one NAT/public IP.
-CLASSROOM_JOIN_USER_MAX_ATTEMPTS = max(3, int(os.getenv("CLASSROOM_JOIN_USER_MAX_ATTEMPTS", "10")))
-CLASSROOM_JOIN_IP_MAX_ATTEMPTS = max(20, int(os.getenv("CLASSROOM_JOIN_IP_MAX_ATTEMPTS", "100")))
-CLASSROOM_JOIN_RATE_WINDOW_SECONDS = max(60, int(os.getenv("CLASSROOM_JOIN_RATE_WINDOW_SECONDS", "600")))
-
 # Shared Redis counters in production; zero-setup in-memory counters in local
 # DEBUG mode. Set REGISTRATION_RATE_LIMIT_CACHE_URL explicitly to use Redis
 # while running Django directly from a local virtualenv.
@@ -309,9 +303,7 @@ else:
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.redis.RedisCache",
-            # MakonBook production currently runs without Docker. Override
-            # REGISTRATION_RATE_LIMIT_CACHE_URL when Redis is remote.
-            "LOCATION": os.getenv("MAKONBOOK_CACHE_URL", "redis://127.0.0.1:6379/3"),
+            "LOCATION": "redis://redis:6379/3",
             "KEY_PREFIX": "makonbook",
         }
     }
@@ -500,11 +492,10 @@ HOLLIHOP_WEBHOOK_SECRET = env_str("HOLLIHOP_WEBHOOK_SECRET", "")
 HOLLIHOP_TIMEOUT_SECONDS = max(3, int(os.getenv("HOLLIHOP_TIMEOUT_SECONDS", "20")))
 HOLLIHOP_MAX_RETRIES = max(0, min(5, int(os.getenv("HOLLIHOP_MAX_RETRIES", "3"))))
 HOLLIHOP_PAGE_SIZE = max(1, min(10000, int(os.getenv("HOLLIHOP_PAGE_SIZE", "1000"))))
-HOLLIHOP_MAX_PAGES = max(5, min(1000, int(os.getenv("HOLLIHOP_MAX_PAGES", "100"))))
 # Hollihop support reported a hard limit of 600 requests / 30 seconds. 0.10s
 # keeps one MakonBook sync worker comfortably below that ceiling, including
 # targeted dependency fetches after a delta is discovered.
-HOLLIHOP_MIN_REQUEST_INTERVAL = max(0.05, float(os.getenv("HOLLIHOP_MIN_REQUEST_INTERVAL", "0.20")))
+HOLLIHOP_MIN_REQUEST_INTERVAL = max(0.05, float(os.getenv("HOLLIHOP_MIN_REQUEST_INTERVAL", "0.10")))
 HOLLIHOP_RECENT_ATTENDANCE_DAYS = max(1, int(os.getenv("HOLLIHOP_RECENT_ATTENDANCE_DAYS", "30")))
 HOLLIHOP_ATTENDANCE_CHUNK_DAYS = max(1, min(90, int(os.getenv("HOLLIHOP_ATTENDANCE_CHUNK_DAYS", "30"))))
 HOLLIHOP_SYNC_LOCK_MINUTES = max(5, int(os.getenv("HOLLIHOP_SYNC_LOCK_MINUTES", "30")))
@@ -518,17 +509,11 @@ HOLLIHOP_TEACHER_POLL_MINUTES = max(5, int(os.getenv("HOLLIHOP_TEACHER_POLL_MINU
 HOLLIHOP_MANAGER_POLL_MINUTES = max(10, int(os.getenv("HOLLIHOP_MANAGER_POLL_MINUTES", "15")))
 # GetEdUnitStudents is Hollihop's heavy endpoint. The automatic full relation
 # sweep is intentionally limited to several times/day and always queryDays=False.
-HOLLIHOP_MEMBERSHIP_SWEEP_MINUTES = max(60, int(os.getenv("HOLLIHOP_MEMBERSHIP_SWEEP_MINUTES", "360")))
+HOLLIHOP_MEMBERSHIP_SWEEP_MINUTES = max(60, int(os.getenv("HOLLIHOP_MEMBERSHIP_SWEEP_MINUTES", "240")))
 HOLLIHOP_STUDENT_PROFILE_SWEEP_MINUTES = max(120, int(os.getenv("HOLLIHOP_STUDENT_PROFILE_SWEEP_MINUTES", "360")))
 HOLLIHOP_EDUNIT_CATALOG_SWEEP_MINUTES = max(120, int(os.getenv("HOLLIHOP_EDUNIT_CATALOG_SWEEP_MINUTES", "360")))
 HOLLIHOP_ATTENDANCE_DELTA_DAYS = max(1, min(30, int(os.getenv("HOLLIHOP_ATTENDANCE_DELTA_DAYS", "7"))))
-HOLLIHOP_ATTENDANCE_SWEEP_MINUTES = max(360, int(os.getenv("HOLLIHOP_ATTENDANCE_SWEEP_MINUTES", "1440")))
 HOLLIHOP_CHECKPOINT_OVERLAP_SECONDS = max(0, min(600, int(os.getenv("HOLLIHOP_CHECKPOINT_OVERLAP_SECONDS", "120"))))
-# Full-sweep deletion circuit breaker. A truncated Hollihop response must not
-# mass-remove otherwise valid classroom memberships.
-HOLLIHOP_MAX_AUTOMATIC_MEMBERSHIP_REMOVALS = max(1, int(os.getenv("HOLLIHOP_MAX_AUTOMATIC_MEMBERSHIP_REMOVALS", "500")))
-HOLLIHOP_MAX_AUTOMATIC_MEMBERSHIP_REMOVAL_RATIO = max(0.01, min(1.0, float(os.getenv("HOLLIHOP_MAX_AUTOMATIC_MEMBERSHIP_REMOVAL_RATIO", "0.35"))))
-HOLLIHOP_MEMBERSHIP_REMOVAL_GUARD_MIN_POPULATION = max(1, int(os.getenv("HOLLIHOP_MEMBERSHIP_REMOVAL_GUARD_MIN_POPULATION", "50")))
 
 # Data synchronization and credential delivery are intentionally separated.
 # Keep the automatic gate false while Eskiz is in test mode.
@@ -555,17 +540,14 @@ HOLLIHOP_FALLBACK_TEACHER_USERNAME = env_str("HOLLIHOP_FALLBACK_TEACHER_USERNAME
 HOLLIHOP_MANAGER_TYPES = {
     item.casefold() for item in env_list(
         "HOLLIHOP_MANAGER_TYPES",
-        "Admin,Administrator,CEO,Chief Executive Officer,Админ,Администратор",
+        "Admin,Administrator,РђРґРјРёРЅ,РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ",
     )
 }
 HOLLIHOP_ACTIVE_STUDENT_STATUSES = {
-    item.casefold() for item in env_list("HOLLIHOP_ACTIVE_STUDENT_STATUSES", "Занимается,Active,Working")
+    item.casefold() for item in env_list("HOLLIHOP_ACTIVE_STUDENT_STATUSES", "Р—Р°РЅРёРјР°РµС‚СЃСЏ,Active,Working")
 }
 HOLLIHOP_INACTIVE_STUDENT_STATUSES = {
-    item.casefold() for item in env_list(
-        "HOLLIHOP_INACTIVE_STUDENT_STATUSES",
-        "Inactive,Archived,Stopped studying,Не занимается,Архив,Закончил обучение",
-    )
+    item.casefold() for item in env_list("HOLLIHOP_INACTIVE_STUDENT_STATUSES", "Inactive,Archived,Stopped studying,РќРµ Р·Р°РЅРёРјР°РµС‚СЃСЏ,РђСЂС…РёРІ")
 }
 
 # SMS provider abstraction. Keep disabled until the provider account, sender and
@@ -590,8 +572,8 @@ ESKIZ_TOKEN_CACHE_SECONDS = max(60, int(os.getenv("ESKIZ_TOKEN_CACHE_SECONDS", "
 
 # Celery / Redis remain available for unrelated background tasks (for example video conversion).
 # Structured Test Import does NOT enqueue Celery jobs and does not require Redis.
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/1")
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/2")
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2")
 CELERY_TASK_TRACK_STARTED = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True

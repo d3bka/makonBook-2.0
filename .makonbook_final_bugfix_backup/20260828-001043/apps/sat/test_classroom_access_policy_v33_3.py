@@ -1,4 +1,4 @@
-from django.contrib.auth.models import Group, User
+from django.contrib.auth.models import User
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -16,8 +16,6 @@ from .models import (
 class ClassroomAccessPolicyV333Tests(TestCase):
     def setUp(self):
         self.teacher = User.objects.create_user(username='policy_teacher', password='pass123')
-        teacher_group, _ = Group.objects.get_or_create(name='Teacher')
-        self.teacher.groups.add(teacher_group)
         self.classroom = Classroom.objects.create(
             teacher=self.teacher,
             name='Policy Classroom',

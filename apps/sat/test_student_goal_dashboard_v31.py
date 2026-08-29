@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Group, User
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -16,6 +16,8 @@ def next_official_sat_date():
 class StudentGoalDashboardV32Tests(TestCase):
     def setUp(self):
         self.teacher = User.objects.create_user(username='v32_teacher', password='pass123')
+        teacher_group, _ = Group.objects.get_or_create(name='Teacher')
+        self.teacher.groups.add(teacher_group)
         self.student = User.objects.create_user(
             username='v32_student',
             password='pass123',

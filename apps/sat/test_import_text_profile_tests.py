@@ -37,7 +37,7 @@ class StructuredPdfTextProfileTests(SimpleTestCase):
     def test_standalone_equation_line_is_preserved(self):
         value = "b − 38 = x/y\nThe given equation relates the positive numbers b, x, and y."
         result = _clean_structured_text(value, section="math", field_name="question")
-        self.assertTrue(result.startswith(r"\(b - 38 = \frac{x}{y}\)\n"))
+        self.assertTrue(result.startswith(r"\(b - 38 = \frac{x}{y}\)" + "\n"))
 
     def test_root_fraction_is_upgraded_without_changing_prose(self):
         value = "The expression (⁷√(p⁵))/√(p^(t+3)), where t is a constant, is equivalent to ⁷√(p²) for all positive values of p."

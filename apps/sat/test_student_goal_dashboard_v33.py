@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -20,19 +21,24 @@ class StudentGoalDashboardV33CsrfTests(TestCase):
         self.university = DreamUniversity.objects.filter(is_active=True).order_by('sort_order', 'name').first()
         self.assertIsNotNone(self.university)
 
-    def test_dashboard_sets_csrf_cookie_and_points_modal_to_refresh_endpoint(self):
+    def test_dashboard_sets_csrf_cookie_and_uses_standard_goal_form(self):
         client = Client(enforce_csrf_checks=True)
         client.force_login(self.student)
 
         response = client.get(reverse('sat_menu'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('csrftoken', response.cookies)
+        self.assertIn(settings.CSRF_COOKIE_NAME, response.cookies)
         self.assertContains(
             response,
-            f'data-csrf-url="{reverse("student_goal_csrf")}"',
+            f'action="{reverse("student_goal_settings")}"',
         )
+        self.assertContains(response, 'data-goal-form')
         self.assertContains(response, 'class="sg-goal-modal-body"')
+        # The browser now uses Django's normal form POST and synchronizes the
+        # embedded token from the CSRF cookie before submit. It deliberately
+        # avoids a second fetch-based CSRF handshake on every save.
+        self.assertNotContains(response, 'data-csrf-url=')
 
     def test_csrf_refresh_endpoint_returns_matching_fresh_token(self):
         client = Client(enforce_csrf_checks=True)
@@ -46,7 +52,7 @@ class StudentGoalDashboardV33CsrfTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()['csrfToken'])
-        self.assertIn('csrftoken', response.cookies)
+        self.assertIn(settings.CSRF_COOKIE_NAME, response.cookies)
         self.assertIn('no-store', response['Cache-Control'])
 
     def test_real_csrf_checked_ajax_save_succeeds(self):

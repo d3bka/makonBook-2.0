@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import time
@@ -127,37 +126,17 @@ class HollihopClient:
         params = dict(params or {})
         take = min(int(params.pop("take", settings.HOLLIHOP_PAGE_SIZE)), 10000)
         skip = int(params.pop("skip", 0))
-        max_pages = int(getattr(settings, "HOLLIHOP_MAX_PAGES", 100))
         result: list[dict] = []
-        seen_full_page_fingerprints: set[str] = set()
-
-        for page_number in range(1, max_pages + 1):
+        while True:
             payload = self._request(function, {**params, "skip": skip, "take": take})
             page = payload.get(result_key) or []
             if not isinstance(page, list):
                 raise HollihopAPIError(f"Expected {result_key} to be a list.")
-
-            if len(page) == take:
-                # A broken upstream `skip` implementation can otherwise return
-                # the same full page forever. Hollihop explicitly warns that
-                # uncontrolled repeated API calls can block the account, so
-                # fail closed before issuing another identical request.
-                serialized = json.dumps(page, sort_keys=True, ensure_ascii=False, default=str, separators=(",", ":"))
-                fingerprint = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-                if fingerprint in seen_full_page_fingerprints:
-                    raise HollihopAPIError(
-                        f"Hollihop pagination repeated the same full {result_key} page; aborted to protect the API account."
-                    )
-                seen_full_page_fingerprints.add(fingerprint)
-
             result.extend(page)
             if len(page) < take:
-                return result
+                break
             skip += take
-
-        raise HollihopAPIError(
-            f"Hollihop pagination exceeded the safety limit of {max_pages} pages for {function}."
-        )
+        return result
 
     def get_students(self, *, client_id=None, last_updated_from=None) -> list[dict]:
         return self._paginate(

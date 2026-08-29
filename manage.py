@@ -6,7 +6,18 @@ import sys
 
 def main():
     """Run administrative tasks."""
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'satmakon.settings')
+    # The test suite must not depend on production-only services such as
+    # hashed static manifests or remote media storage.  A dedicated Django
+    # settings module already exists for that purpose, so make ``manage.py
+    # test`` use it automatically.  Other management commands keep the
+    # normal application settings unchanged.
+    if len(sys.argv) > 1 and sys.argv[1] == "test":
+        os.environ["DJANGO_SETTINGS_MODULE"] = os.environ.get(
+            "DJANGO_TEST_SETTINGS_MODULE",
+            "satmakon.test_settings",
+        )
+    else:
+        os.environ.setdefault("DJANGO_SETTINGS_MODULE", "satmakon.settings")
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:

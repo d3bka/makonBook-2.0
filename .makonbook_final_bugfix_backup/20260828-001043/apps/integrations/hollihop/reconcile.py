@@ -14,7 +14,7 @@ from apps.integrations.models import HollihopSyncLog, HollihopSyncState
 from apps.sat.models import Classroom
 
 from .normalization import normalize_email, normalize_phone, safe_text
-from .sync import HollihopSyncAlreadyRunning, HollihopSyncEngine, hollihop_bool
+from .sync import HollihopSyncAlreadyRunning, HollihopSyncEngine
 
 User = get_user_model()
 
@@ -27,7 +27,6 @@ class SmartSyncReport:
     teacher_rows_checked: int = 0
     manager_poll_ran: bool = False
     membership_sweep_ran: bool = False
-    attendance_sweep_ran: bool = False
     student_profile_sweep_ran: bool = False
     edunit_catalog_sweep_ran: bool = False
     unknown_classrooms_created: int = 0
@@ -41,7 +40,6 @@ class SmartSyncReport:
             "teacher_rows_checked": self.teacher_rows_checked,
             "manager_poll_ran": self.manager_poll_ran,
             "membership_sweep_ran": self.membership_sweep_ran,
-            "attendance_sweep_ran": self.attendance_sweep_ran,
             "student_profile_sweep_ran": self.student_profile_sweep_ran,
             "edunit_catalog_sweep_ran": self.edunit_catalog_sweep_ran,
             "unknown_classrooms_created": self.unknown_classrooms_created,
@@ -116,7 +114,7 @@ def _teacher_needs_update(data: dict, user) -> bool:
     email = normalize_email(data.get("EMail"))
     phone = normalize_phone(data.get("Mobile") or data.get("Phone"))
     status = safe_text(data.get("Status"), 150)
-    active = not hollihop_bool(data.get("Fired"))
+    active = not bool(data.get("Fired"))
     if first and user.first_name != first:
         return True
     if last and user.last_name != last:
@@ -146,7 +144,7 @@ class HollihopSmartReconciler:
 
     Therefore the 5-minute cycle uses Student/EdUnit deltas plus small catalog
     checks. The relation-only GetEdUnitStudents full sweep is deliberately much
-    less frequent (default every 6 hours), while webhooks and targeted relation
+    less frequent (default every 4 hours), while webhooks and targeted relation
     fetches cover many changes immediately/quickly.
     """
 
@@ -186,17 +184,14 @@ class HollihopSmartReconciler:
         )
         existing = _existing_student(client_id)
 
-        if allowed_relations or existing is not None:
-            # Existing MakonBook users must keep receiving profile/status updates
-            # even after they leave their last allowed GROUP. New users with no
-            # allowed GROUP are still intentionally skipped.
+        if allowed_relations:
             self.engine.summary.students_found += 1
             if _student_needs_update(self.engine, data, existing):
                 with transaction.atomic():
                     self.engine._sync_student(data)
-        else:
+        elif existing is None:
             # Student exists only in ONLINE/IV units (or no allowed unit): do not
-            # create a brand-new MakonBook account.
+            # create a MakonBook account.
             return
 
         # Even an empty allowed relation set is meaningful for an existing user:
@@ -378,7 +373,7 @@ class HollihopSmartReconciler:
         ):
             return
         # This is the only automatic full GetEdUnitStudents sweep. It explicitly
-        # excludes Days/payments and defaults to every 6 hours (4 times/day), in
+        # excludes Days/payments and defaults to every 4 hours (6 times/day), in
         # line with Hollihop support's warning against frequent full exports.
         errors_before = self.engine.summary.errors
         relations = self.client.get_ed_unit_students(
@@ -391,27 +386,6 @@ class HollihopSmartReconciler:
             cursor["membership_sweep_at"] = _cursor_iso(now)
         else:
             self.report.notes.append("Membership sweep had row errors; it will retry on the next cycle.")
-
-    def _attendance_sweep(self, cursor, now):
-        if not _due(
-            cursor,
-            "attendance_sweep_at",
-            minutes=settings.HOLLIHOP_ATTENDANCE_SWEEP_MINUTES,
-            now=now,
-        ):
-            return
-        errors_before = self.engine.summary.errors
-        date_to = timezone.localdate()
-        date_from = date_to - timedelta(days=settings.HOLLIHOP_ATTENDANCE_DELTA_DAYS - 1)
-        # Webhook PassSet is the fast path. This bounded daily sweep is only a
-        # safety net for webhook/worker downtime and never requests the full
-        # attendance history.
-        self.engine.sync_attendance(date_from=date_from, date_to=date_to)
-        self.report.attendance_sweep_ran = True
-        if self.engine.summary.errors == errors_before:
-            cursor["attendance_sweep_at"] = _cursor_iso(now)
-        else:
-            self.report.notes.append("Attendance safety sweep had row errors; it will retry on the next cycle.")
 
     def run(self, *, require_initial=True):
         state = self._state()
@@ -440,7 +414,6 @@ class HollihopSmartReconciler:
             self._student_profile_sweep(cursor, cycle_started)
             self._edunit_catalog_sweep(cursor, cycle_started)
             self._membership_sweep(cursor, cycle_started)
-            self._attendance_sweep(cursor, cycle_started)
 
             state = self._state()
             self._save_cursor(state, cursor, last_incremental=timezone.now())
@@ -477,7 +450,6 @@ def mark_initial_sync_completed(*, at=None):
         "student_profile_sweep_at": _cursor_iso(at),
         "edunit_catalog_sweep_at": _cursor_iso(at),
         "membership_sweep_at": _cursor_iso(at),
-        "attendance_sweep_at": _cursor_iso(at),
     }
     state.save(
         update_fields=[
