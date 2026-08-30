@@ -1,13 +1,75 @@
 # MakonBook — Technical Audit for Mobile App & New Backend Design
 
 **Audit date:** 2026-08-16
+**Last updated:** 2026-08-29 — refreshed against `main` through commit `3513fe9`; the codebase moved from ~v33.8 to **v33.9.1** plus post-audit infrastructure and hotfix work. All material deltas are collected in [Section 0 — Update Log](#0-update-log-2026-08-29) and cross-linked into the sections they change.
 **Scope:** Full read of the MakonBook Django codebase (backend + server-rendered frontend), performed to serve as the single source of truth for designing a new, separate STUDENT-ONLY mobile app and its own new backend. Admin/teacher web functionality is documented only as deep as needed to understand the content pipeline.
 **Method:** Every finding below is traceable to a file path (and usually a line number). Where the code was ambiguous or a design intent could not be confirmed from source, it is listed in [Section 10 — Open Questions](#10-open-questions) instead of being assumed.
 
 ---
 
+## 0. Update Log (2026-08-29)
+
+Changes to the codebase since the original 2026-08-16 audit that alter findings below. Each item names the commit(s) and the section(s) it revises.
+
+### 0.1 Async infrastructure now exists — Celery + Redis are installed and running (`8574d68`, `fb4fe8e`)
+
+The audit's flat statement that *"Background/async jobs: **None functional**"* and *"Celery isn't in `requirements.txt`, there's no Redis/broker"* is **no longer true**:
+
+- `celery[redis]==5.6.3` is now in `requirements.txt:44`; `satmakon/celery.py` exists and `satmakon/__init__.py` loads `celery_app`.
+- Both `docker-compose.yml` and `docker-compose.prod.yml` now run a **`redis` service** (`redis:7-alpine`, appendonly) **and a `celery-worker` service** (`celery -A satmakon worker --concurrency=2`).
+- Redis DBs are partitioned: `/1` Celery broker, `/2` Celery result backend, `/3` the shared rate-limit / cache backend (see 0.4).
+
+**However**, the only Celery task that exists is still `convert_video_to_hls` (`apps/sat/tasks.py`) and **nothing anywhere calls it** — `BaseVideo` / HLS remain dead code, now with live infrastructure behind them. The new **Test Import** pipeline (0.2) was built to run Celery-free (it briefly used Celery in `fb4fe8e`, then `8574d68` removed that path and runs it synchronously in the request). Net: the infra is real and available for the mobile backend's own jobs (push, reminders), but no student-facing async work runs on it today. Revises [§2](#2-tech-stack-summary), [§3](#3-architecture-overview), [§4.6](#46-third-party-integrations), [§8](#8-non-functional-notes).
+
+### 0.2 Test Import Center — a real structured content-import + review + publish pipeline (`fb4fe8e` v33.9, `8574d68`)
+
+**This is the single biggest change and it invalidates several audit conclusions.** The audit said questions are created *"one at a time through Django's built-in `/admin/`"*, that *"there is no bulk CSV/JSON import UI"*, and that *"there is no existing structured export/import format to reuse — a new content-sync mechanism has to be designed from scratch."* There is now:
+
+- **New app surface**: `apps/sat/test_import_service.py` (~1500 lines), `test_import_views.py` (~870), `test_import_forms.py`, `test_import_cleanup.py`, `test_import_rate_limit.py`, `test_icon_service.py`, `test_management_service.py`, `test_management_forms.py`; templates under `templates/sat/test_import/`; routes under `/sat/test-imports/` (`apps/sat/urls.py:45-65`); migrations `sat/0033`–`sat/0035`.
+- **New models** (`apps/sat/models.py:2359+`): `TestImportJob`, `TestImportQuestion`, `TestImportReview`, plus `MakonNotification` (in-app notification model — the first one in the codebase).
+- **Flow**: a **Manager/Admin** uploads two "MakonBook Structured PDF v2" files (one Reading & Writing, one Math — spec + prompt + example live in `static/assets/test-import/makonbook-structured-pdf-v2-*`). `_parse_structured_pdf()` (`test_import_service.py:930`) extracts questions, choices, embedded images and the answer key **deterministically with PyMuPDF — no AI call** on the structured path. Parsed rows land in `TestImportQuestion` staging with per-question `validation_status` (`ok`/`warning`/`error`). **Support Teacher** group members assigned as reviewers approve or request changes; `TestImportJob.required_approvals` defaults to **2**. An **optional** AI answer-audit (OpenAI *or* DeepSeek, see 0.3) can be run per-batch from the review screen. `publish_import_job()` (`test_import_service.py:1433`) then creates the real `Test` + bulk-creates `English_Question`/`Math_Question` rows, and **auto-materializes `StudentPracticeTestAccess`** for every classroom whose policy is "all tests".
+- The **legacy** arbitrary-PDF path (AI extraction via `TEST_IMPORT_MODEL`) is kept only for pre-existing staging jobs.
+
+**Consequence for the mobile backend**: a structured content format and an import→validate→review→publish pipeline now exist to build on. It is still an *ingestion* pipeline into the monolith's own `Test`/`*_Question` tables (not an export API), but §9's "Option B/C" content-sync recommendations should be re-evaluated against it. Revises [§4.2](#42-adminteacher-only-endpoints-brief), [§4.5](#45-core-business-logic), [§6](#6-data-models-reference), [§9](#9-recommendations-for-the-mobile-app).
+
+### 0.3 DeepSeek is now an alternative AI provider for question auditing (`8574d68`)
+
+`QUESTION_AUDIT_PROVIDER` (`satmakon/settings.py:494`) now selects `openai` or `deepseek`, **auto-preferring DeepSeek when `DEEPSEEK_API_KEY` is set**. Applies to both the CLI question-audit tool and the Test Import Center's optional answer audit. The Test Import AI audit is the **first web-triggered path that sends question text to an external LLM** (the original audit tool is CLI-only) — still question-bank content only, never student/attempt data. Revises [§4.5](#45-core-business-logic), [§4.6](#46-third-party-integrations).
+
+### 0.4 Caching is now configured; production rate-limiting is no longer per-process (`fb4fe8e`/earlier, confirmed at HEAD)
+
+§4.8 says *"No `CACHES` setting is configured."* It now is (`satmakon/settings.py:285-306`): **Redis** (`redis://redis:6379/3`) in production, `LocMemCache` only in local `DEBUG`. The audit's concern that *"a client can get up to `workers × limit` attempts before being throttled"* is **resolved in production** (shared counter store); it still applies to local dev. Revises [§4.7](#47-security-measures), [§4.8](#48-caching), [§8](#8-non-functional-notes).
+
+### 0.5 Registration is now rate-limited; roles are centralized and Groups are strictly authoritative (`8574d68`, `b938837`)
+
+- **Registration rate limiting** added: `apps/base/registration_rate_limit.py` (HMAC-hashed IP + identifier keys, configurable windows via `REGISTRATION_RATE_LIMIT_*` in settings, uses the shared cache from 0.4), wired into `apps/base/views.py:159`. **Login itself still has no rate limiting** — that gap stands.
+- **Roles centralized** into `apps/sat/roles.py` with a documented rule: *"Django Groups are the source of truth… a Classroom owned by a user or a SupportTeacherProfile never grant a role by themselves."* This **reverses** the audit's note that *"classroom ownership alone is treated as authoritative even without the group, for legacy accounts"* — `is_teacher()` (`apps/sat/views.py:5548`) now delegates to `roles.is_teacher`, which is **group-only**. Removing the `Teacher` group now revokes teacher access. Revises [§4.3](#43-authentication--authorization), [§7](#7-user-roles--permissions).
+
+### 0.6 `Test` model gained availability + "NEW" semantics (`8574d68`, migrations `sat/0036`–`sat/0039`)
+
+- `Test.published_at` (nullable, indexed) + `Test.is_new` property (True for 7 days after `published_at`) — drives a `NEW` badge on the practice-tests dashboard (`templates/sat/practice_tests.html:164`).
+- `Test.is_available` (BooleanField, indexed, default True) — a **third access dimension** on top of the two the audit already flagged. It gates *authenticated* student/teacher/support-teacher/classroom attempts only; **Guest Mode and staff QA (`Admin`/`Tester`/`Manager`/`Teacher`/`Support Teacher`) bypass it** (`_test_attempts_open`, `apps/sat/views.py:951`). A closed test returns **HTTP 423** to AJAX callers (`_closed_test_json`, `views.py:981`). `Test.name` `max_length` is now 400.
+- Revises [§4.4](#44-database-schema), [§4.5](#45-core-business-logic), [§6](#6-data-models-reference).
+
+### 0.7 Repo hygiene pass (`1e1627e` "Got rid off trash")
+
+Removed from version control: `db.sqlite3`, the entire `.idea/` directory, the committed `staticfiles/` `collectstatic` output, vendored `static/assets/js/jquery.min.js` + `bootstrap.min.js`, and **many** of the exact dead/hotfix CSS/JS files the audit enumerated in §8 (`makon-auth-show-{balance,desktop,hard}-fix.css`, `sat-test-classic-v16.css`, `sat-test-flow-v14.css`, `support-booking-v29.js`/`.css`, `makon-math.css`, `makon-faq-animation.css`, `makon-after-login-fix.css`, …). Added `.env.example`, `.env.production.example`, `scripts/cleanup_project.py`, `scripts/normalize_env.py`. The "CSS/JS hotfix-on-hotfix" evidence in §8 is now **partially cleaned up** — still present but smaller. Revises [§5](#5-frontend-deep-dive), [§8](#8-non-functional-notes).
+
+### 0.8 Production schema drift — orphaned columns dropped, registration 500 incident (`b938837`, `3513fe9`)
+
+Migrations `base/0041`, `base/0042`, `sat/0040`, `sat/0041` drop columns that were applied **directly to the production database out-of-band and never tracked by a migration** — leftovers from an abandoned "HolliHop" integration and an abandoned "offline student credentials delivery" feature (`middle_name`, `phone_number`, `must_change_password`, `credentials_delivery_status`, `credentials_last_sent_at` on `base_userprofile`). Three were `NOT NULL` with no default, so every `POST /register/` raised `IntegrityError` → **HTTP 500 on all signups** until a defaults-only hotfix was applied to prod directly and `0042` reconciled the schema. `.gitattributes` (`eol=lf`) was also added to stop a Windows-mount CRLF rewrite that was producing repo-wide no-op diffs.
+
+**This is a standing risk for §9's "Option A: shared read replica"** — the production DB has a demonstrated history of schema changes landing ahead of (or entirely outside) Django migrations. Revises [§8](#8-non-functional-notes), [§9](#9-recommendations-for-the-mobile-app), [§10](#10-open-questions).
+
+### 0.9 Responsive exam-window work has started (`8574d68`)
+
+New `static/assets/css/makon-exam-responsive-v2.css` (~1400 lines) + `static/assets/js/makon-exam-viewport-v2.js`, plus edits to `test-eng.js`/`test-math.js` and `makon-test-window.css`. The web team has begun adapting the exam-taking UI to small viewports — relevant reference material for the mobile exam screen, though it is responsive-web work, not a native design. Revises [§5](#5-frontend-deep-dive).
+
+---
+
 ## Table of Contents
 
+0. [Update Log (2026-08-29)](#0-update-log-2026-08-29)
 1. [Project Overview](#1-project-overview)
 2. [Tech Stack Summary](#2-tech-stack-summary)
 3. [Architecture Overview](#3-architecture-overview)
@@ -61,15 +123,16 @@ MakonBook is a Django 5.1.5 web platform for **"SAT Makon"**, a learning center 
 | Backend framework | **Django 5.1.5** (Python, `requirements.txt`; project docs say Python 3.12.3) | Classic server-rendered MVT app, no DRF/GraphQL |
 | Package manager (Python) | `pip` + `requirements.txt` (44 lines) | No poetry/pipenv |
 | Database | **PostgreSQL 16.9** in production (migrated from SQLite in July 2025, `docs/postgresql_migration_guide.md`); SQLite remains the local-dev fallback in `satmakon/settings.py` | ORM: Django's built-in ORM (no separate query layer) |
+| Cache | **Redis** (`redis:7-alpine`, `redis://redis:6379/3`) in production; `LocMemCache` in local `DEBUG` — see [§0.4](#0-update-log-2026-08-29). Used for rate-limit counters | Added since original audit; §4.8 text predates it |
 | Frontend | **Django Templates** (server-rendered HTML) + vanilla JS/jQuery + **two coexisting Bootstrap versions** (4.3.1 for the app, 5.3.3 vendored with a landing-page theme) | **No React/Vue/Angular, no `package.json`, no JS package manager** — confirmed absent from the repo |
 | Frontend build tooling | None — static assets are hand-written and served via **WhiteNoise** (`CompressedManifestStaticFilesStorage`) | No webpack/vite/esbuild |
 | Auth | Django session cookies + CSRF cookie (custom name `makonbook_csrftoken_v35`) + **django-allauth** for Google OAuth | **No JWT/token/DRF auth layer exists anywhere in the codebase** (confirmed by repo-wide grep) |
 | Object/file storage | **Cloudflare R2** (S3-compatible) via `django-storages` + `boto3`, split into a public bucket path (`PublicStorage`, unsigned URLs) and a private path (`PrivateStorage`, signed URLs) | Static files are *not* on R2 (WhiteNoise/local); only media (question images, videos, certificates) |
 | PDF generation | **PyMuPDF (`fitz`)** | Used for SAT score certificates and for an internal AI question-audit report |
 | Email | SMTP (`django.core.mail`, configurable host, defaults to `smtp.gmail.com`) | Used for password-reset codes only; registration email verification is currently bypassed |
-| Background/async jobs | **None functional.** `apps/sat/tasks.py` imports Celery, but Celery/Redis are not installed, not configured, and the task is never called anywhere — dead code | No cron, no APScheduler, no django-q |
+| Background/async jobs | **Infrastructure now present, still nothing student-facing runs on it** — `celery[redis]==5.6.3`, `satmakon/celery.py`, and `redis` + `celery-worker` Compose services all exist since the audit ([§0.1](#0-update-log-2026-08-29)). But the only task (`convert_video_to_hls`) is still called from nowhere, and the new Test Import pipeline runs Celery-free/synchronously | No cron, no APScheduler, no django-q; no Celery Beat |
 | Messaging bot | **aiogram 3.13.1** (async Telegram bot), admin-only tool to bulk-create student accounts, run in its own Docker container | Not student-facing |
-| Hosting/deployment | **Docker Compose** (`docker-compose.yml` dev, `docker-compose.prod.yml` prod) — `web` (gunicorn), `telegram-bot`, `nginx` (reverse proxy + TLS), `db` (Postgres, dev only — prod shares an external Postgres container) | `certbot` container handles Let's Encrypt renewal in prod |
+| Hosting/deployment | **Docker Compose** (`docker-compose.yml` dev, `docker-compose.prod.yml` prod) — `web` (gunicorn), `telegram-bot`, `nginx` (reverse proxy + TLS), `redis`, `celery-worker` (both added since the audit — [§0.1](#0-update-log-2026-08-29)), `db` (Postgres, dev only — prod shares an external Postgres container) | `certbot` container handles Let's Encrypt renewal in prod |
 | WSGI server | **gunicorn** | `satmakon.wsgi.application` |
 | CI | None found in the repo (no `.github/workflows`, no CI config) | |
 
@@ -107,7 +170,8 @@ There is **no API layer distinct from the website** — the "backend" and "front
 - **No WebSockets/SSE anywhere.** "Real-time" features are short-poll: classroom chat polls every 3s (visible tab) / 15s (hidden tab); classroom-join-status page polls via a full page reload every ≥3–5s.
 
 ### Background processes / workers / cron
-- **None are functional in production.** The only `celery`-decorated task (`convert_video_to_hls` in `apps/sat/tasks.py`) cannot even run — Celery isn't in `requirements.txt`, there's no Redis/broker, and no code anywhere calls the function. This is a vestige of an unfinished HLS video-streaming feature.
+- **Update ([§0.1](#0-update-log-2026-08-29)):** a Celery worker + Redis broker now run in both Compose files and `celery[redis]` is installed. Despite that, **no student-facing async work executes** — the sole task `convert_video_to_hls` is still called from nowhere, and the new Test Import pipeline was deliberately built to run synchronously in the web request. The infra is available for the mobile backend's own jobs but is effectively idle today.
+- The only `celery`-decorated task (`convert_video_to_hls` in `apps/sat/tasks.py`) is still **dead** — nothing calls it; `BaseVideo`/HLS remain an unfinished, abandoned feature (now with live infrastructure sitting behind it).
 - The only genuinely scheduled process in the whole stack is infrastructure-level: the `certbot` container's TLS-renewal loop (every 12h) in `docker-compose.prod.yml`.
 - Two content-audit tools exist as **manual CLI management commands** only (not scheduled, not web-triggered): a heuristic data-integrity checker (`audit_data_integrity[_v2].py`) and an OpenAI-backed question-quality auditor (`audit_questions_with_ai.py`).
 
@@ -236,6 +300,7 @@ Not deep-dived per the audit brief — listed for completeness only. All under `
 
 - **Users/Groups**: `admin_users`, `admin_user_detail/edit/delete/create`, `admin_groups`, `admin_group_detail/delete/remove_user`, `edit_group_tests` (assign `Test`s to a `Group` — the core group-based access-control mechanism).
 - **Tests/Mocks**: `admin_tests`, `admin_test_detail` (read-only dashboards — question creation itself happens through Django's built-in `/admin/` interface), `admin_mocks`, `admin_mock_create/detail/download/delete` (bulk-provisions a `Group` + throwaway `User` accounts + a `Mock` bundle for one proctored session; `admin_mock_download` streams **plaintext** generated passwords as a `.txt` file — flagged as a real security concern in [8](#8-non-functional-notes)).
+- **Test Import Center (`/sat/test-imports/`, new — [§0.2](#0-update-log-2026-08-29))**: `test_import_list/create/detail/preview/process/status/publish/review/delete`, `test_import_question_edit`, `test_import_audit_batch`, `test_import_pdf`, `managed_test_list/edit/delete`, `managed_test_question_edit`, `managed_test_toggle_availability`, `test_import_notifications_read`. Upload/parse/publish is **Manager/Admin**-gated (`_manager_allowed`); per-question review is **Support Teacher**-gated. This is now the primary way full tests reach the catalog.
 - **Support teachers (admin side)**: `admin_support_teachers`, `admin_support_bookings`, teacher create/edit/toggle/availability CRUD.
 - **Classroom/teacher management**: `teacher_classroom_list/dashboard`, `create_classroom`, `generate_classroom_join_code`, `classroom_join_requests`, `approve_join_request`/`reject_join_request`, `update_student_section_access`, `update_classroom_section_access`, `update_classroom_practice_test_access`, `update_classroom_ap_test_access`, `classroom_progress_dashboard` and its per-student/per-section drill-downs, `delete_classroom`, `edit_classroom`.
 - **Vocabulary (teacher content management)**: `teacher_vocabulary_units`, `create_vocabulary_unit/word/question`, `bulk_import_vocabulary_words`.
@@ -263,7 +328,9 @@ EmailVerification.objects.update_or_create(
 ```
 (`apps/base/views.py:169-178`) — no verification email is actually sent, though the `EmailVerification` model, its 24-hour-expiry default, and the `/activate/<token>/` view all still exist unused. **Decide explicitly whether the mobile signup flow should (re-)implement real verification.**
 
-**Login** (`apps/base/views.py:125-147`): accepts username *or* email (an `@` in the field triggers an email lookup, then authenticates by the resolved username). Generic error message on failure (no username enumeration). **No rate-limiting or lockout on failed login attempts** — a real gap to close in the new backend, especially since password-reset and classroom-join-code flows *do* rate-limit elsewhere.
+**Login** (`apps/base/views.py:125-147`): accepts username *or* email (an `@` in the field triggers an email lookup, then authenticates by the resolved username). Generic error message on failure (no username enumeration). **No rate-limiting or lockout on failed login attempts** — a real gap to close in the new backend, especially since password-reset, classroom-join-code and now **registration** flows *do* rate-limit elsewhere.
+
+**Update ([§0.5](#0-update-log-2026-08-29)):** `/register/` is now rate-limited — `apps/base/registration_rate_limit.py` (`check_registration_rate_limit`, wired at `apps/base/views.py:159`) throttles per HMAC-hashed client IP **and** per identifier (username/email), windows configurable via `REGISTRATION_RATE_LIMIT_*` settings, backed by the shared Redis cache in production. Login is still unprotected.
 
 **Google OAuth**: fully delegated to `django-allauth` (`satmakon/settings.py:398-424`) — `SOCIALACCOUNT_EMAIL_VERIFICATION="none"`, PKCE enabled, auto-connects Google sign-in to an existing email/password account by verified email. No custom adapter code was found. A mobile app would very likely use native Google Sign-In (ID-token verification server-side) rather than reuse allauth's redirect flow.
 
@@ -271,14 +338,14 @@ EmailVerification.objects.update_or_create(
 
 **Profile-completion gate** (`complete_profile_name`, `apps/base/views.py:86-116`): AJAX endpoint validating first/last name (Unicode-aware — accepts Uzbek/Russian characters, hyphens, apostrophes). **Could not confirm from `views.py` alone whether this is a hard onboarding gate or a soft, dismissible prompt** — see Open Questions.
 
-**Roles are Django `Group` rows**, not a `role` field on `User`. Exact group name strings found in code (`apps/sat/views.py`, `apps/base/models.py`, grep for `.groups.filter(name=`):
+**Roles are Django `Group` rows**, not a `role` field on `User`. **Update ([§0.5](#0-update-log-2026-08-29)):** role checks are now centralized in `apps/sat/roles.py`, and the documented rule is that **Groups are strictly authoritative** — a `Classroom` you own or a `SupportTeacherProfile` you have never grants a role by itself. The row below marked *"classroom ownership alone is treated as authoritative"* is **superseded**: `is_teacher()` is now group-only. Exact group name strings found in code (`apps/sat/roles.py`, `apps/sat/views.py`, grep for `.groups.filter(name=`):
 
 | Group | Grants |
 |---|---|
 | `OFFLINE` | Per-user custom English/Math section time limits (`UserProfile.english_time_minutes`/`math_time_minutes`); also a longer review window / more retakes per `docs/review_time_policy.md` (3 days / 4 retakes vs. 24h / 2 retakes for regular students) |
 | `Admin`, `Tester` | Elevated bypass rights inside `apps/sat` (classroom-teacher-only checks, review-ownership checks, single-answer-check endpoint) |
 | `Manager` | Routes to a manager dashboard (`is_manager()`); operational oversight of teachers/classrooms |
-| `teacher` (case-insensitive) | `is_teacher()` = has the group **or** owns an active `Classroom` row (classroom ownership alone is treated as authoritative even without the group, for legacy accounts) |
+| `Teacher` (case-insensitive) | `is_teacher()` = **has the `Teacher` group, full stop** (`apps/sat/roles.py`). ~~or owns an active `Classroom`~~ — that fallback was removed post-audit ([§0.5](#0-update-log-2026-08-29)); removing the group now revokes access |
 | `student` | Loose/fallback definition — essentially "not a teacher" |
 | `dev` | Internal dev-tools access |
 | `Support Teacher` (implied by having a `SupportTeacherProfile` row, not strictly a group) | Routes to the support-teacher planner |
@@ -303,13 +370,16 @@ Full field-by-field detail (with file:line citations) is preserved for engineeri
 5. `GlobalEventAnswer.question_id` is a raw integer with **no FK/referential integrity** (disambiguated only by a `section` string) — contrast with the AP app's `APExamAnswer.question`, which is a proper FK. Normalize this in the new schema.
 6. **No payment/subscription model exists anywhere.** The only "purchase"-named model (`PurchasedLessonPackage`) has no price/currency/transaction fields — it's a manually-granted entitlement flag, not real payment infrastructure.
 7. `BaseVideo` (HLS video model) and `Lesson.videos`/`LessonProgress.check_completion()` are **broken/dead code** — `check_completion()` references a `lesson.videos` relation that doesn't actually exist and would raise `AttributeError` if called. Do not port as-is.
+8. **Production schema drift ([§0.8](#0-update-log-2026-08-29)):** the prod database has repeatedly carried columns that were **never created by a Django migration** (abandoned "HolliHop" and "offline credentials delivery" features), dropped only reactively by `base/0041`, `base/0042`, `sat/0040`, `sat/0041`. One such column caused an `IntegrityError` 500 on **every registration** until hotfixed. Any design that reads the prod DB directly (§9 Option A) must treat the live schema as potentially ahead of / divergent from the ORM models.
 
 #### Model inventory by app
 
 **`apps.base`** — `EmailVerification`, `PasswordResetCode`, `UserProfile` (1:1 with `User`, per-section timers), `GeneralIssueReport`.
 
-**`apps.sat`** (core, 51 models) — grouped:
-- *Question bank*: `QuestionDomain`, `QuestionType`, `Test`, `English_Question`, `Math_Question`, `MakeupTest` (+ its through-tables), `SecretCode`, `Mock`.
+**`apps.sat`** (core, ~55 models — **+4 since audit**, see [§0.2](#0-update-log-2026-08-29)) — grouped:
+- *Question bank*: `QuestionDomain`, `QuestionType`, `Test` (now also `published_at` / `is_available`, [§0.6](#0-update-log-2026-08-29)), `English_Question`, `Math_Question`, `MakeupTest` (+ its through-tables), `SecretCode`, `Mock`.
+- *Structured content import (**new**)*: `TestImportJob`, `TestImportQuestion`, `TestImportReview` — staging + multi-reviewer approval for the Test Import Center ([§0.2](#0-update-log-2026-08-29)).
+- *Notifications (**new**)*: `MakonNotification` — first in-app notification model (test-review / test-published events; no push).
 - *Attempt/scoring engine*: `TestModule`, `TestModuleDraft`, `MakeupTestModuleDraft`, `TestReview`, `TestStage`, `Punishment` (see anti-cheat note below).
 - *Classroom system*: `Classroom`, `ClassroomJoinCode`, `ClassroomMembership`, `StudentSectionAccess`, `ClassroomSectionAccessPolicy`, `ClassroomPracticeTestAccessPolicy`, `StudentPracticeTestAccess`, `StudentProgress`, `ChatMessage`.
 - *Guest/global events*: `GlobalEvent`, `GuestParticipant`, `GlobalEventAttempt`, `GlobalEventModuleDraft`, `GlobalEventAnswer`.
@@ -334,11 +404,17 @@ There is a second, parallel content type: **`MakeupTest`** — a teacher-curated
 
 **Access control**: a `Test` is visible to a non-classroom student only if they share a Django `Group` with `Test.groups` (assigned via the admin's `edit_group_tests` screen — a full replace-set operation, not additive). Classroom students instead see whatever `StudentPracticeTestAccess` rows their membership has (seeded from the classroom's policy). **These two systems are independent and not obviously reconciled** — worth explicit design attention for the new backend's authorization model.
 
-**Content creation pipeline (admin/teacher side, web-only)**: Questions are created **one at a time** through Django's built-in `/admin/` interface (custom forms with a "Save and go to next question" convenience button implying sequential manual entry) — **there is no bulk CSV/JSON import UI**. A few one-off developer CLI scripts exist (`apps/sat/management/commands/copy_english_questions.py` etc.) for DB-to-DB copies, not for external import. **Implication for the mobile backend: there is no existing structured export/import format to reuse — a new content-sync mechanism has to be designed from scratch** (see [9](#9-recommendations-for-the-mobile-app)).
+**Update ([§0.6](#0-update-log-2026-08-29)):** a **third dimension** now sits on top — `Test.is_available` (bool). When False, *all authenticated* attempt paths (student, classroom, teacher) are blocked with **HTTP 423** (`_test_attempts_open` / `_closed_test_json`, `apps/sat/views.py:951`/`981`), while **Guest Mode and staff QA roles bypass it**. Existing attempts/results are preserved. `Test.published_at` + `Test.is_new` (7-day window) drive a `NEW` badge on the dashboard. So the new backend's test-authorization model must reconcile **three** inputs: group membership, classroom access rows, and an availability flag.
+
+**Content creation pipeline (admin/teacher side, web-only)** — **substantially changed since the audit, see [§0.2](#0-update-log-2026-08-29):**
+
+- **Original path (still available):** Questions created **one at a time** through Django's built-in `/admin/` ("Save and go to next question" button), no bulk CSV/JSON import there. One-off dev CLI scripts (`copy_english_questions.py` etc.) do DB-to-DB copies only.
+- **New path — the Test Import Center (`/sat/test-imports/`):** a Manager/Admin uploads two **"MakonBook Structured PDF v2"** files (Reading & Writing + Math; format spec, extraction prompt and a worked example ship in `static/assets/test-import/makonbook-structured-pdf-v2-*`). `_parse_structured_pdf()` (`apps/sat/test_import_service.py:930`) deterministically extracts every question, choice, embedded image and the answer key **with PyMuPDF and no AI call**. Rows stage in `TestImportQuestion` with per-question validation; **Support Teacher** reviewers approve (default **2** approvals via `TestImportJob.required_approvals`); an optional per-batch AI answer audit (OpenAI or DeepSeek) is available on the review screen; `publish_import_job()` (`test_import_service.py:1433`) creates the real `Test` + bulk `English_Question`/`Math_Question` rows and grants classroom access.
+- **Revised implication for the mobile backend:** a structured content format **and** an import→validate→review→publish pipeline now exist. It is an *ingestion* pipeline into the monolith's tables, not an export API — but §9's Option B/C should be re-evaluated against reusing the Structured PDF v2 schema and the `TestImportQuestion` shape as the interchange format (see [9](#9-recommendations-for-the-mobile-app)).
 
 A related but distinct concept, **`Mock`**, is an operational bundle (Test + auto-created Group + batch of throwaway `User` accounts with generated credentials) used to run one proctored mock-exam session — not exam content itself.
 
-An **AI-assisted content-quality audit** exists (`apps/sat/question_audit.py`) — a CLI-only management command that sends question text (never student data) to OpenAI (`gpt-5.6-terra` per settings default) to independently re-solve every question and flag `wrong_key`/`ambiguous`/`multiple_valid_answers`/etc., producing a PDF report. It is explicitly read-only (no DB writes) and not wired into any web UI or scheduled job.
+An **AI-assisted content-quality audit** exists (`apps/sat/question_audit.py`) — sends question text (never student data) to an LLM to independently re-solve every question and flag `wrong_key`/`ambiguous`/`multiple_valid_answers`/etc. **Update ([§0.3](#0-update-log-2026-08-29)):** the provider is now selectable — `QUESTION_AUDIT_PROVIDER` picks `openai` (`gpt-5.6-terra`) or `deepseek` (`deepseek-v4-flash`), **auto-preferring DeepSeek when `DEEPSEEK_API_KEY` is set**. The original CLI management command still produces a read-only PDF report, but the same audit is now also reachable **from the web** as an optional per-batch step in the Test Import Center review screen ([§0.2](#0-update-log-2026-08-29)) — still question-bank content only, never attempt/score data.
 
 #### Timing/timer logic
 
@@ -434,15 +510,17 @@ Post-test, `question(request, key, section, module, id)` (`apps/sat/views.py:267
 | **PyMuPDF (`fitz`)** | `apps/sat/libs/certificate/certificate.py`; `apps/sat/question_audit.py` | Certificate PDF generation (opens a template, overlays score text + a domain-proficiency box grid); internal AI-audit PDF report | Not a network service — local PDF library |
 | **SMTP email** | `django.core.mail`, configurable host (default `smtp.gmail.com`) | Password-reset codes only | Registration verification email is currently not sent (see 4.3) |
 | **Google OAuth** | `django-allauth` | Social login | No custom adapter found |
-| **OpenAI API** | `apps/sat/question_audit.py`, raw `urllib` calls to `/v1/responses` | Admin-only, CLI-triggered question-bank quality audit | Confirmed **student data is never sent** — payload is built strictly from question-bank fields, never from attempt/score tables. Not reachable from any web view |
+| **OpenAI API** | `apps/sat/question_audit.py`, `apps/sat/test_import_service.py`, raw `urllib` calls to `/v1/responses` | Question-bank quality audit; legacy arbitrary-PDF test extraction | Confirmed **student data is never sent** — payload is question-bank fields only. **Update ([§0.2](#0-update-log-2026-08-29)/[§0.3](#0-update-log-2026-08-29)):** the audit is now **also web-reachable** (optional step in the Test Import Center); the deterministic Structured PDF v2 import path makes **no** LLM call |
+| **DeepSeek API** | `apps/sat/question_audit.py` (`DEEPSEEK_BASE_URL`) | Alternative provider for the question audit | New since audit ([§0.3](#0-update-log-2026-08-29)); auto-preferred when `DEEPSEEK_API_KEY` set. Same "no student data" guarantee |
+| **Redis** | `satmakon/settings.py` (`CACHES`, Celery broker/backend), `docker-compose*.yml` | Rate-limit/cache counter store (`/3`); Celery broker (`/1`) + result backend (`/2`) | New since audit ([§0.1](#0-update-log-2026-08-29)/[§0.4](#0-update-log-2026-08-29)). Prod only — local `DEBUG` uses `LocMemCache` and no worker |
 | **Telegram (aiogram)** | `apps/telegram_bot/` | Internal admin tool: bulk-create student accounts via a Telegram chat bot | Not student-facing, not a notification channel, runs as its own Docker service |
 | **Payment/subscription providers** | — | **None found anywhere** — a repo-wide grep for payment/stripe/payme/click.uz/paycom/subscription/premium/price/tariff/billing/invoice/paywall returned zero genuine hits (all hits were false positives: a Bootstrap Icons glyph literally named "stripe", and a CSS comment using "premium" to mean UI polish) | Confirms the audit brief's premise: no payment code exists, dormant or otherwise |
 
-**Broken/vestigial integration to flag**: `apps/sat/tasks.py` imports Celery and defines an HLS video-conversion task that shells out to `ffmpeg` — but Celery isn't installed, there's no broker configured, and the function is never called from anywhere in the codebase. This is dead code from an apparently-abandoned video-streaming feature; do not treat it as a working reference implementation.
+**Broken/vestigial integration to flag**: `apps/sat/tasks.py` defines an HLS video-conversion Celery task that shells out to `ffmpeg`. **Update ([§0.1](#0-update-log-2026-08-29)):** Celery, a Redis broker and a `celery-worker` container now *do* exist — but the function is still **called from nowhere** and `BaseVideo` is still dead. It is abandoned-feature code that now has live infrastructure idling behind it; do not treat it as a working reference implementation.
 
 ### 4.7 Security Measures
 
-- **Rate limiting** exists in a few specific places (all using Django's default in-process cache — see [4.8](#48-caching) for a caveat): classroom join-code submission (5 attempts / 10 min, per IP), guest/global-event access-code entry (10 failures / 15 min, per session), password-reset code attempts (5 tries then invalidated). **Login itself has no rate limiting or lockout** — a gap worth closing for a public-facing mobile API.
+- **Rate limiting** exists in a few specific places: classroom join-code submission (5 attempts / 10 min, per IP), guest/global-event access-code entry (10 failures / 15 min, per session), password-reset code attempts (5 tries then invalidated), and — **new since audit ([§0.5](#0-update-log-2026-08-29))** — registration (per hashed IP + identifier) and Test Import submissions (`test_import_rate_limit.py`: 15 s cooldown + 6 / 600 s). **Update ([§0.4](#0-update-log-2026-08-29)):** these counters now use a **shared Redis cache in production** (`LocMemCache` only in local `DEBUG`), so the "per-process, under-throttles at N workers" caveat in [4.8](#48-caching) no longer applies in prod. **Login itself still has no rate limiting or lockout** — a gap worth closing for a public-facing mobile API.
 - **CSRF**: Django's standard CSRF middleware, custom-named cookie, `SameSite=Lax`. All state-changing AJAX endpoints send `X-CSRFToken`.
 - **CORS**: No `django-cors-headers` or equivalent found — the app doesn't need CORS today because there's no cross-origin API consumer. A mobile backend **will** need explicit CORS/API-auth design since it's a new consumer by definition.
 - **Input validation**: Django Forms throughout (`apps/base/forms.py`, `apps/sat/forms*.py`) plus hand-written normalization/validation for exam answers (`_normalize_live_test_answer`, answer length caps, allowed-letter checks).
@@ -456,13 +534,17 @@ Post-test, `question(request, key, section, module, id)` (`apps/sat/views.py:267
 
 ### 4.8 Caching
 
-**No `CACHES` setting is configured** in `satmakon/settings.py` — Django falls back to its default `LocMemCache` (per-process, in-memory, **not shared** across gunicorn's multiple worker processes). The Django cache framework is used in exactly one place: the rate-limiting counters described above (`django.core.cache.cache`, `apps/sat/views.py`). **Because this cache is per-process, a client can get up to `workers × limit` attempts before being throttled** — a real correctness gap if this rate-limiting approach is ported as-is; the new backend should use a shared cache (Redis) for any rate-limiting/counter logic. No page/fragment caching, no `@cache_page`, exists anywhere.
+**Update ([§0.4](#0-update-log-2026-08-29)): `CACHES` is now configured** (`satmakon/settings.py:285-306`) — **Redis** (`redis://redis:6379/3`) in production, `LocMemCache` only when local `DEBUG` and no `REGISTRATION_RATE_LIMIT_CACHE_URL` is set. The rate-limiting counters (`django.core.cache.cache`) therefore share one store across gunicorn workers in prod, closing the `workers × limit` over-count gap described below. In **local dev** the original caveat still holds.
+
+*(Original finding, still true for local dev:)* with `LocMemCache` the cache is per-process and **not shared** across gunicorn workers, so a client could get up to `workers × limit` attempts before being throttled — the new backend should use a shared cache (Redis) for any rate-limiting/counter logic. No page/fragment caching, no `@cache_page`, exists anywhere.
 
 ---
 
 ## 5. Frontend Deep-Dive
 
-**Architecture confirmed: no separate frontend framework.** No `package.json`, no `node_modules`, no React/Vue/Angular anywhere in the repo. This is 100% server-rendered Django templates styled with **two coexisting Bootstrap versions** (4.3.1 for the main app, 5.3.3 vendored with a separate landing-page theme — a real consistency debt) plus hand-written vanilla JS/jQuery loaded per-page via `<script>` tags. `staticfiles/` is confirmed pure `collectstatic` output, not source.
+**Architecture confirmed: no separate frontend framework.** No `package.json`, no `node_modules`, no React/Vue/Angular anywhere in the repo. This is 100% server-rendered Django templates styled with **two coexisting Bootstrap versions** (4.3.1 for the main app, 5.3.3 vendored with a separate landing-page theme — a real consistency debt) plus hand-written vanilla JS/jQuery loaded per-page via `<script>` tags. `staticfiles/` was pure `collectstatic` output and has since been removed from version control ([§0.7](#0-update-log-2026-08-29)); vendored `jquery.min.js`/`bootstrap.min.js` were also removed (now CDN/other-sourced).
+
+**Update ([§0.9](#0-update-log-2026-08-29)):** a responsive pass on the exam window has begun — `static/assets/css/makon-exam-responsive-v2.css` (~1400 lines), `static/assets/js/makon-exam-viewport-v2.js`, plus `makon-test-window.css` / `test-eng.js` / `test-math.js` edits. Useful reference for the mobile exam screen (it shows which exam-UI elements the team considers viewport-critical), but it is responsive-web, not a native layout.
 
 ### Template inventory (grouped by area)
 
@@ -546,12 +628,21 @@ This section is the authoritative field-level schema reference for designing the
 |---|---|---|
 | `QuestionDomain` | `name` | — |
 | `QuestionType` | `name` | FK → `QuestionDomain` |
-| `Test` | **`name` (PK, string)**, `groups` (M2M), `icon` | M2M → `Group` |
+| `Test` | **`name` (PK, string, `max_length=400`)**, `groups` (M2M), `icon`, **`published_at`** (nullable, indexed — drives `is_new`, 7-day window), **`is_available`** (bool, indexed — authenticated-attempt gate; guests + staff QA bypass; [§0.6](#0-update-log-2026-08-29)) | M2M → `Group` |
 | `English_Question` | `module` (`module_1`/`module_2`), `number`, `passage`, `question`, `a/b/c/d`, `response_type` (`multiple_choice`/`open_text`), `answer`, `accepted_answers`, `answer_patterns`, `explained`, `image`, `graph` | FK → `Test`, `QuestionDomain`, `QuestionType` |
 | `Math_Question` | Same core fields + `written` (bool, grid-in flag), `image_a..d`, `choice_graph`, `img_explain` | FK → `Test`, `QuestionDomain`, `QuestionType` |
 | `MakeupTest` | `name`, `description`, `groups` (M2M) | M2M → `English_Question`/`Math_Question` (through ordered tables) |
 | `SecretCode` | `code` (6-digit, unique) | FK → `Group`, `MakeupTest` (nullable), `Test` (nullable) |
 | `Mock` | `mode` (`secret_code`/`direct`), `user_count`, `credentials` (plaintext — flagged) | FK → `Test`, `Group`, `SecretCode`, `User` (created_by) |
+
+### `apps.sat` — structured content import (new — [§0.2](#0-update-log-2026-08-29))
+
+| Model | Key fields | Relationships |
+|---|---|---|
+| `TestImportJob` | `name`, `english_pdf`/`math_pdf` (structured v2; `source_pdf`/`answer_pdf` legacy), `requested_test_type`/`detected_test_type` (`auto`/`full`/`english`/`math`), `status` (`uploaded`→`processing`→`review_required`→`changes_requested`→`ready_to_publish`→`publishing`→`published`/`failed`), `required_approvals` (default 2), `structure_data`/`processing_log` (JSON), `progress_*`, `ai_model`, `celery_task_id` (vestigial — import no longer uses Celery) | FK → `User` (created_by); O2O → `Test` (`published_test`) |
+| `TestImportQuestion` | `section`/`module`/`number`, `passage`/`question`/`a`–`d`/`answer`/`explanation`, `image`/`image_a`–`d` (staged to `PublicStorage`), `response_type`, `written`, `graph`/`choice_graph`, `source_page`, `ai_confidence`, `validation_status` (`ok`/`warning`/`error`) + `validation_errors` (JSON), `audit_*` (verdict/severity/confidence/summary/verified_answer/recommended_fix), `raw_payload` (JSON) | FK → `TestImportJob` (`questions`) |
+| `TestImportReview` | `verdict` (`pending`/`approved`/`changes_requested`), `note`, `reviewed_at` | FK → `TestImportJob` (`reviews`), `User` (reviewer) — unique per (job, reviewer) |
+| `MakonNotification` | `type` (`test_review`/`test_published`), `title`, `message`, `url`, `is_read` | FK → `User` — first in-app notification model; **no push/email delivery**, UI-poll only |
 
 ### `apps.sat` — attempt & scoring engine
 
@@ -698,11 +789,12 @@ APMockExam ─1:N─ APExamEvent ─1:N─ APExamAttempt(User OR guest) ─1:N�
 
 ### Technical debt / legacy patterns / code smells worth knowing before rebuilding
 
-- **CSS/JS hotfix-on-hotfix pattern**: e.g. 10 separate stylesheets for the login/register pages alone (`makon-auth.css`, `makon-auth-final-fix.css`, `makon-auth-header-hotfix.css`, `-show-balance-fix`, `-show-clean-fix`, `-show-desktop-fix`, `-show-hard-fix`, `-show-light-fix`, `-show-raise-fix`...), and versioned-but-coexisting duplicates elsewhere (`support-booking-v29.js`/`.css` vs. `v33`, `sat-test-flow-v13` → `sat-test-interactions-v21` → `sat-test-classic-v16`). This indicates iterative patching without consolidation — **treat these files as a signal to re-derive the intended final UI from a live rendered page, not as clean source to port.**
+- **CSS/JS hotfix-on-hotfix pattern**: originally e.g. ~10 stylesheets for the login/register pages alone (`makon-auth.css`, `-final-fix`, `-header-hotfix`, `-show-balance-fix`, `-show-clean-fix`, `-show-desktop-fix`, `-show-hard-fix`, `-show-light-fix`, …), and versioned-but-coexisting duplicates elsewhere (`support-booking-v29` vs. `v33`, `sat-test-flow-v13` → `-interactions-v21` → `-classic-v16`). **Update ([§0.7](#0-update-log-2026-08-29)):** commit `1e1627e` deleted a large batch of these (`-show-{balance,desktop,hard}-fix.css`, `sat-test-classic-v16.css`, `sat-test-flow-v14.css`, `support-booking-v29.*`, `makon-math.css`, `makon-faq-animation.css`, `makon-after-login-fix.css`, …) — the pattern is smaller but not gone. Still **treat surviving *-fix / versioned files as a signal to re-derive the intended final UI from a live rendered page, not as clean source to port.**
 - **Two Bootstrap versions** (4.3.1 app-wide, 5.3.3 vendored for the landing page) and **two icon libraries** (Font Awesome 4.7, Bootstrap Icons) coexist with no shared design tokens.
-- **Dead/broken code identified**: the `Punishment`/anti-cheat stub (nothing calls it); `apps/sat/guest_services.py` (orphaned, schema-mismatched scoring stub); `apps/sat/tasks.py`'s Celery-based HLS video conversion (Celery not installed, function never called); `BaseVideo`/`Lesson.videos`/`LessonProgress.check_completion()` (references a non-existent relation, would raise `AttributeError` if invoked); a duplicate, unused `normalize_written_value()` alongside the actually-used `_normalize_written_token()`; `templates/test/temp` (a stray Python script, not a template); `get_max_retakes()` always returning `None` (retake-limit UI path unreachable).
+- **Dead/broken code identified**: the `Punishment`/anti-cheat stub (nothing calls it); `apps/sat/guest_services.py` (orphaned, schema-mismatched scoring stub); `apps/sat/tasks.py`'s Celery-based HLS video conversion (**Celery is now installed and a worker runs — [§0.1](#0-update-log-2026-08-29) — but the function is still called from nowhere**); `BaseVideo`/`Lesson.videos`/`LessonProgress.check_completion()` (references a non-existent relation, would raise `AttributeError` if invoked); a duplicate, unused `normalize_written_value()` alongside the actually-used `_normalize_written_token()`; `templates/test/temp` (a stray Python script, not a template); `get_max_retakes()` always returning `None` (retake-limit UI path unreachable); `TestImportJob.celery_task_id` (vestigial — the import pipeline dropped its Celery path in `8574d68`).
 - **Naming/consistency issues**: `module_1`/`module_2` (question bank) vs. `m1`/`m2` (attempt tracking) for the same concept; `Test.name` as a string primary key; `GlobalEventAnswer.question_id` as an unconstrained raw integer (contrast with the AP app's proper FK equivalent); `ChatMessage.is_deleted` exists as a soft-delete field but the actual delete view hard-deletes instead.
-- **Security-relevant debt**: plaintext bulk-mock-exam credentials stored and re-downloadable (`Mock.credentials`); an unhashed temporary-password field in the Telegram bot's `GeneratedUser` model; the unauthenticated/unscoped `rankings` view; per-process (non-shared) rate-limiting cache that under-throttles at more than one worker.
+- **Security-relevant debt**: plaintext bulk-mock-exam credentials stored and re-downloadable (`Mock.credentials`); an unhashed temporary-password field in the Telegram bot's `GeneratedUser` model; the unauthenticated/unscoped `rankings` view; ~~per-process rate-limiting cache~~ (**resolved in prod** by the Redis `CACHES` config — [§0.4](#0-update-log-2026-08-29); still applies in local dev).
+- **Production schema drift ([§0.8](#0-update-log-2026-08-29))**: the live DB has twice carried columns added out-of-band with no migration (abandoned HolliHop + "offline credentials delivery" features); one triggered a 100%-of-registrations `IntegrityError` 500, hotfixed directly on prod then reconciled by `base/0042`. Migrations `base/0041-0042` and `sat/0040-0041` are pure `IF EXISTS` column-drop cleanups. A `.gitattributes` (`eol=lf`) was added to stop a Windows-mount CRLF rewrite that produced repo-wide phantom diffs. **Direct-DB integration plans (§9 Option A) inherit this risk.**
 - **Historical data event**: a documented full data wipe on **2025-07-29** (`docs/system_cleanup_guide.md`) deleted all `TestReview`/`TestModule` rows and all `User` accounts except one admin, going from 3,855 users / 9,318 reviews / 38,541 modules down to 1/0/0 (question bank content was preserved). Any historical-analytics assumptions should account for this discontinuity. The same event included the SQLite→PostgreSQL migration and a 50-migration-file consolidation down to 2 files (docs describing "2 clean migration files" are now stale — the current repo has accumulated 40 and 32 migration files respectively in `base`/`sat` since then, which is normal incremental history, not a regression).
 - **Known, documented, recurring content-quality issues** (per `docs/auth_question_integrity_fix.md` and the `audit_data_integrity[_v2].py` management commands): malformed answer-choice text with leftover label prefixes ("A.", "B)"), Cyrillic/Latin single-letter answer confusion (С/В/Д vs C/B/D), duplicate `(test,module,number)` keys, and duplicate/blank answer choices. A new backend's content-import/validation layer should guard against these proactively rather than assume clean source data.
 
@@ -728,7 +820,11 @@ APMockExam ─1:N─ APExamEvent ─1:N─ APExamAttempt(User OR guest) ─1:N�
 
 ### Content pipeline: how exam content reaches the new mobile backend
 
-Admins will keep creating tests/questions through the existing Django app; the new backend needs that content without becoming the same monolith. Options, with tradeoffs:
+Admins will keep creating tests/questions through the existing Django app; the new backend needs that content without becoming the same monolith.
+
+**Update ([§0.2](#0-update-log-2026-08-29)):** the picture has shifted. There is now a **"MakonBook Structured PDF v2"** format (spec/prompt/example in `static/assets/test-import/`) and a full **import → deterministic parse → per-question validation → multi-reviewer approval → publish** pipeline (`apps/sat/test_import_*`). The parsed `TestImportQuestion` rows are a clean, already-normalized intermediate representation (explicit `section`/`module`/`number`, typed `response_type`, per-question images, `validation_status`). This is the closest thing to a content-interchange contract the project has ever had. Re-read Options B/C below with that in mind — the export format for Option B could simply *be* the `TestImportQuestion` shape, and the review/approval workflow is already solved.
+
+Options, with tradeoffs:
 
 | Option | How it works | Pros | Cons |
 |---|---|---|---|
@@ -741,7 +837,7 @@ Admins will keep creating tests/questions through the existing Django app; the n
 ### Mobile-specific concerns to plan for
 
 - **Offline/poor-connectivity exam-taking**: the current web design assumes frequent server round-trips (20s autosave interval) and has **no grace period** for a device that goes offline for a whole module — it just force-submits from the last server draft when contact resumes. For mobile, this needs deliberate redesign: a local write-ahead queue of every answer change, an explicit "offline, will sync" UI state, and a defined grace/reconciliation window (e.g., pause the deadline clock, or extend it by the detected offline duration, rather than silently truncating a student's answers) — this is a product decision, not just an engineering one.
-- **Push notifications**: none exist today anywhere in the stack (no FCM/APNs integration, no notification model). Net-new work — relevant for exam reminders, classroom-approval status, support-lesson confirmations, chat messages (which currently rely on the student having the chat screen open and polling).
+- **Push notifications**: still no FCM/APNs integration and no delivery mechanism. **Update ([§0.2](#0-update-log-2026-08-29)):** a `MakonNotification` model now exists, but it is **in-app only** (staff-facing test-review events, rendered by UI poll) — not a transport, not student-facing. Push remains net-new work — relevant for exam reminders, classroom-approval status, support-lesson confirmations, chat messages. Note the **Celery + Redis infra now available ([§0.1](#0-update-log-2026-08-29))** would host the sending job if the new backend shares it.
 - **Background timers**: since the exam timer is already server-authoritative (`deadline_at`), a mobile app's job is simpler than it might seem — it doesn't need to keep an accurate background timer running, just resync `deadline_at` on foreground/reconnect and render locally in between. Still needs a local notification ("5 minutes left") scheduled against that same deadline for when the app is backgrounded.
 - **Anti-cheat/proctoring**: currently doesn't exist at all (web or otherwise) — if this matters for a mobile product (arguably more, since a phone is easier to have a second device next to), it needs to be scoped as new work, not "port the existing system."
 
@@ -759,18 +855,22 @@ Consolidated from every research pass, each requiring a decision or clarificatio
 1. **Email verification**: the schema/flow for real email verification still exists (`EmailVerification`, `/activate/<token>/`) but the live registration path auto-activates and never sends the email. Should the mobile signup flow implement real verification, or intentionally match the web app's current soft/no-verification behavior?
 2. **`complete_profile_name`**: could not confirm from `apps/base/views.py` alone whether this is a hard onboarding gate (blocks other pages until a name is set) or a soft, dismissible prompt. Needs confirmation (likely lives in template/JS logic) before deciding whether mobile needs an equivalent forced step.
 3. **Guest → registered account conversion**: no merge/link path exists anywhere (SAT guest attempts or AP guest attempts) once a guest later registers. Is "try a test, then sign up and keep the score" a desired product capability for mobile? If yes, this is net-new design, not a port.
-4. **Login has no rate-limiting**, unlike password-reset and classroom-join-code flows which do. Intentional gap, or should it be closed as part of the redesign (it should be, for any public mobile API)?
-5. **Two parallel test-access systems** (global `Test.groups` vs. classroom-scoped `StudentPracticeTestAccess`) — not clearly reconciled in the current code (e.g., `approve_join_request` seeds section access at `False` by default rather than visibly always applying the classroom-wide policy in the same code path). Needs a single, well-specified authorization model for the new backend rather than inheriting the ambiguity.
+4. **Login has no rate-limiting**, unlike password-reset, classroom-join-code and (since [§0.5](#0-update-log-2026-08-29)) registration flows which do. Intentional gap, or should it be closed as part of the redesign (it should be, for any public mobile API)?
+5. **Now three parallel test-access dimensions** ([§0.6](#0-update-log-2026-08-29)): global `Test.groups`, classroom-scoped `StudentPracticeTestAccess`, and the `Test.is_available` on/off flag (which guests + staff bypass). Still not reconciled in one code path. The new backend needs a single, well-specified authorization model rather than inheriting the ambiguity — and a decision on whether `is_available` is a per-cohort schedule or just a global kill-switch.
 6. **Retake limits**: `get_max_retakes()` always returns `None` (unlimited) — is unlimited retakes the intended product behavior, or is enforcing a cap on the roadmap? This materially affects both scoring-history UX and backend storage growth.
 7. **`Punishment`/anti-cheat**: confirmed dead code with no caller. Was this feature deliberately removed, or is it an unfinished stub the team intends to complete? Relevant before assuming "there's no anti-cheat need" is itself a settled product decision rather than an accident.
 8. **Rankings/leaderboard scope**: the existing `rankings` view is fully public/unauthenticated and spans all classrooms for a test. Is that the intended visibility model, or should a mobile equivalent be scoped to the student's own classroom/cohort and require auth?
 9. **Adaptive difficulty**: the current platform does not implement real Module-2-difficulty branching (only a scoring-formula approximation of adaptive compression). Is building genuine adaptive routing in scope for the new backend, given this is a defining feature of the real digital SAT?
 10. **Scoring curve provenance**: the `calculator.py` band constants (question counts, ratio cutoffs, section caps, curve powers) have no documented derivation anywhere in the codebase or `docs/`. Should these be validated/recalibrated against real College Board concordance data as part of the rebuild, or intentionally kept as-is for continuity with existing certificates/results?
-11. **Content pipeline mechanism** (Section 9's Option A/B/C): which approach does the team prefer, and does it change based on expected admin-side content-update frequency (daily edits vs. occasional new test drops)?
+11. **Content pipeline mechanism** (Section 9's Option A/B/C): which approach does the team prefer, and does it change now that a **Structured PDF v2 format + import/review/publish pipeline exists** ([§0.2](#0-update-log-2026-08-29))? Specifically: should the mobile backend consume the `TestImportQuestion` intermediate representation (or the Structured PDF v2 files directly) rather than reading `Test`/`*_Question` tables?
 12. **Shared vs. separate mobile identity**: confirm the recommendation in Section 9 (shared `User`/credentials) against any constraint this audit couldn't see (e.g., planned separate mobile-only signup flows, data-residency requirements, or a desire to keep mobile fully decoupled from the legacy `auth_user` table for migration-risk reasons).
 13. **Payment/monetization roadmap**: confirmed no payment code exists today (not even dormant). Should the new backend's schema anticipate future paid tiers (e.g., reserve fields/tables now) even though it's explicitly out of scope for this phase?
 14. **i18n scope**: the audit brief assumed broader existing localization than what's actually implemented (only one page has real EN/RU/UZ support). Does the mobile app need full multi-language UI from day one, and if so, is the `apps/ratings` pattern (per-page dictionaries) an acceptable model to extend, or should a proper i18n framework be introduced for both platforms simultaneously?
-15. **Video/HLS feature**: `BaseVideo` and the Celery-based HLS conversion pipeline are both broken/dead code, suggesting an abandoned or paused video-lessons feature. Is video content (lesson videos, explanation videos) in scope for the mobile app's first version, and if so, does it need to be designed fresh (nothing here is reusable as working code, only as a rough shape of intent)?
+15. **Video/HLS feature**: `BaseVideo` and the Celery-based HLS conversion pipeline are both broken/dead code, suggesting an abandoned or paused video-lessons feature. Is video content (lesson videos, explanation videos) in scope for the mobile app's first version, and if so, does it need to be designed fresh (nothing here is reusable as working code, only as a rough shape of intent)? *(Note: Celery/Redis infra now exists — [§0.1](#0-update-log-2026-08-29) — so only the task wiring and `BaseVideo` model are missing, not the runtime.)*
+16. **Reuse the Test Import review workflow?** ([§0.2](#0-update-log-2026-08-29)) The new pipeline already implements multi-reviewer approval, per-question validation, and an optional AI answer-audit. Is that workflow (2-approval default, Support-Teacher reviewer model) the intended long-term content-QA process to build the mobile content store on, or an interim web-only tool?
+17. **Web-triggered LLM calls** ([§0.3](#0-update-log-2026-08-29)): the Test Import AI audit now sends question text to OpenAI/DeepSeek from a web request (previously CLI-only). Are provider choice, data-retention posture, and cost ceiling for that acceptable for a production path?
+18. **Shared Celery/Redis** ([§0.1](#0-update-log-2026-08-29)): infra now exists but idles. Should the mobile backend share this Redis/Celery deployment for its own jobs (push, reminders, content sync), or stand up its own?
+19. **Production schema drift** ([§0.8](#0-update-log-2026-08-29)): given the demonstrated history of untracked out-of-band column changes on the prod DB, is a shared-DB / read-replica integration (§9 Option A) acceptable risk, or does that alone push the integration to an API/export boundary?
 
 ---
 
