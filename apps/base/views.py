@@ -2,7 +2,8 @@
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
+from django.contrib.auth.forms import SetPasswordForm
 from django.core.mail import EmailMultiAlternatives
 from django.utils.crypto import get_random_string
 from django.urls import reverse
@@ -11,6 +12,7 @@ from datetime import timedelta
 from django.utils import timezone
 from .models import EmailVerification, PasswordResetCode
 from .registration_rate_limit import check_registration_rate_limit
+from .auth_rate_limit import check_auth_rate_limit
 from .decorators import *
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -129,21 +131,21 @@ def loginUser(request):
         credential = (request.POST.get("username") or "").strip()
         password = request.POST.get("password") or ""
 
-        username_for_auth = credential
-        if "@" in credential:
-            User = get_user_model()
-            matched_user = User.objects.filter(email__iexact=credential).order_by("id").first()
-            if matched_user:
-                username_for_auth = matched_user.get_username()
+        rate = check_auth_rate_limit(request, action="login", identifier=credential)
+        if not rate.allowed:
+            messages.error(request, "Too many sign-in attempts. Please wait a little before trying again.")
+            response = render(request, "base/login.html", {}, status=429)
+            response["Retry-After"] = str(rate.retry_after)
+            return response
 
-        user = authenticate(request, username=username_for_auth, password=password)
+        user = authenticate(request, username=credential, password=password)
         if user is not None:
             if user.is_active:
                 login(request, user)
                 return redirect("sat_menu")
             messages.error(request, "Your account is not active. Please contact support.")
         else:
-            messages.error(request, "Username/email or password is incorrect.")
+            messages.error(request, "Username, email, phone, or password is incorrect.")
     context = {}
     return render(request, 'base/login.html', context)
 
@@ -222,6 +224,13 @@ def forgot_password(request):
         form = ForgotPasswordRequestForm(request.POST)
         if form.is_valid():
             email = form.cleaned_data["email"].strip().lower()
+
+            rate = check_auth_rate_limit(request, action="forgot_password", identifier=email)
+            if not rate.allowed:
+                messages.error(request, "Too many reset-code requests. Please wait before trying again.")
+                response = render(request, "base/forgot_password.html", {"form": form}, status=429)
+                response["Retry-After"] = str(rate.retry_after)
+                return response
             request.session["password_reset_email"] = email
 
             User = get_user_model()
@@ -290,6 +299,13 @@ def password_reset_confirm(request):
             code = form.cleaned_data["code"].strip()
             new_password = form.cleaned_data["new_password"]
 
+            rate = check_auth_rate_limit(request, action="reset_password", identifier=email)
+            if not rate.allowed:
+                messages.error(request, "Too many password reset attempts. Please wait before trying again.")
+                response = render(request, "base/password_reset_confirm.html", {"form": form}, status=429)
+                response["Retry-After"] = str(rate.retry_after)
+                return response
+
             User = get_user_model()
             user = User.objects.filter(email__iexact=email, is_active=True).order_by("id").first()
             generic_error = "Invalid or expired confirmation code."
@@ -327,6 +343,9 @@ def password_reset_confirm(request):
 
             user.set_password(new_password)
             user.save(update_fields=["password"])
+            if hasattr(user, "profile") and user.profile.must_change_password:
+                user.profile.must_change_password = False
+                user.profile.save(update_fields=["must_change_password", "updated_at"])
 
             reset_code.is_used = True
             reset_code.save(update_fields=["is_used"])
@@ -339,6 +358,32 @@ def password_reset_confirm(request):
         form = PasswordResetCodeForm(initial={"email": initial_email})
 
     return render(request, "base/password_reset_confirm.html", {"form": form})
+
+
+@login_required(login_url="login")
+def change_temporary_password(request):
+    if not getattr(request.user.profile, "must_change_password", False):
+        return redirect("sat_menu")
+    if request.method == "POST":
+        rate = check_auth_rate_limit(request, action="temporary_password", identifier=str(request.user.pk))
+        if not rate.allowed:
+            form = SetPasswordForm(request.user, request.POST)
+            messages.error(request, "Too many password-change attempts. Please wait before trying again.")
+            response = render(request, "base/change_temporary_password.html", {"form": form}, status=429)
+            response["Retry-After"] = str(rate.retry_after)
+            return response
+        form = SetPasswordForm(request.user, request.POST)
+        if form.is_valid():
+            user = form.save()
+            update_session_auth_hash(request, user)
+            user.profile.must_change_password = False
+            user.profile.credentials_delivery_status = "completed"
+            user.profile.save(update_fields=["must_change_password", "credentials_delivery_status", "updated_at"])
+            messages.success(request, "Your password has been changed successfully.")
+            return redirect("sat_menu")
+    else:
+        form = SetPasswordForm(request.user)
+    return render(request, "base/change_temporary_password.html", {"form": form})
 
 
 @unauthenticated_user

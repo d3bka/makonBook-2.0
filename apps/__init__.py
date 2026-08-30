@@ -1,0 +1,1 @@
+"""MakonBook Django applications package."""

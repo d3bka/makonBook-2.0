@@ -44,6 +44,13 @@ class MakonErrorPageMiddleware:
     def _maybe_replace_response(self, request, response):
         if response.status_code not in self.HTML_ERROR_STATUSES:
             return response
+        # API/webhook responses must stay machine-readable. In particular, a
+        # JSON 403 from the Hollihop webhook must never be replaced with the
+        # branded HTML error template (which can also require collected static
+        # files that are intentionally absent in the test environment).
+        content_type = (response.get("Content-Type", "") or "").lower()
+        if "application/json" in content_type:
+            return response
         if not self._wants_html(request):
             return response
         if getattr(response, "streaming", False):
@@ -68,3 +75,30 @@ class MakonErrorPageMiddleware:
             },
             status=response.status_code,
         )
+
+
+class TemporaryPasswordChangeMiddleware:
+    """Force server-side password change before any normal authenticated page."""
+
+    ALLOWED_PREFIXES = (
+        "/change-temporary-password/",
+        "/logout/",
+        "/static/",
+        "/media/",
+        "/admin/logout/",
+    )
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated:
+            try:
+                must_change = bool(user.profile.must_change_password)
+            except Exception:
+                must_change = False
+            if must_change and not any((request.path or "").startswith(prefix) for prefix in self.ALLOWED_PREFIXES):
+                from django.shortcuts import redirect
+                return redirect("change_temporary_password")
+        return self.get_response(request)

@@ -1,6 +1,6 @@
 from datetime import time, timedelta
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Group, User
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -24,6 +24,8 @@ class SupportTeacherProfileV29Tests(TestCase):
             last_name='Rakhimova',
             email='kamila@example.com',
         )
+        support_group, _ = Group.objects.get_or_create(name='Support Teacher')
+        self.support_user.groups.add(support_group)
         self.profile = SupportTeacherProfile.objects.create(
             user=self.support_user,
             display_name='Kamila SAT',

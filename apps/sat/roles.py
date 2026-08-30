@@ -78,4 +78,8 @@ def can_manage_classroom(user, classroom):
         return False
     if getattr(user, "is_superuser", False):
         return True
-    return bool(is_teacher(user) and classroom.teacher_id == user.id)
+    if not is_teacher(user):
+        return False
+    if classroom.teacher_id == user.id:
+        return True
+    return classroom.memberships.filter(user=user, role="teacher", status="approved").exists()

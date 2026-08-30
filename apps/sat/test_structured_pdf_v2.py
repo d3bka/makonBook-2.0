@@ -59,4 +59,7 @@ class StructuredPdfV2Tests(SimpleTestCase):
         self.assertNotIn("VISUAL:QUESTION", item["passage"])
         self.assertNotIn("TABLE VISUAL", item["passage"])
         self.assertEqual(item["answer"], "C")
-        self.assertTrue(item["_visual_assets"]["main"][0].startswith(b"\x89PNG"))
+        asset = item["_visual_assets"]["main"][0]
+        self.assertTrue(asset["png"].startswith(b"\x89PNG"))
+        self.assertTrue(asset["svg"].lstrip().startswith(b"<svg"))
+        self.assertIn(asset["mode"], {"vector-svg", "raster-backed-svg"})

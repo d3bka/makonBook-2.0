@@ -24,6 +24,8 @@ class SupportBookingV33Tests(TestCase):
         self.support_user = User.objects.create_user(
             username='support_v33', password='pass12345', first_name='Amina'
         )
+        support_group, _ = Group.objects.get_or_create(name='Support Teacher')
+        self.support_user.groups.add(support_group)
         self.support_teacher = SupportTeacherProfile.objects.create(
             user=self.support_user,
             display_name='Amina Support',
@@ -36,6 +38,8 @@ class SupportBookingV33Tests(TestCase):
         self.classroom_teacher = User.objects.create_user(
             username='class_teacher_v33', password='pass12345'
         )
+        teacher_group, _ = Group.objects.get_or_create(name='Teacher')
+        self.classroom_teacher.groups.add(teacher_group)
         self.classroom = Classroom.objects.create(
             teacher=self.classroom_teacher, name='V33 SAT'
         )

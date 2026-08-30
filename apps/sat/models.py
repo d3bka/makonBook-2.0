@@ -1876,6 +1876,11 @@ class Classroom(models.Model):
         db_index=True,
     )
     is_active = models.BooleanField(default=True)
+    # Hollihop organizational identity. Nullable keeps all legacy classrooms intact.
+    hollihop_edunit_id = models.BigIntegerField(null=True, blank=True, unique=True)
+    hollihop_corporative = models.BooleanField(null=True, blank=True)
+    hollihop_managed = models.BooleanField(default=False)
+    hollihop_last_synced_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -1948,6 +1953,9 @@ class ClassroomMembership(models.Model):
     approved_at = models.DateTimeField(blank=True, null=True)
     left_at = models.DateTimeField(blank=True, null=True)
     removed_at = models.DateTimeField(blank=True, null=True)
+    hollihop_managed = models.BooleanField(default=False)
+    hollihop_status = models.CharField(max_length=30, blank=True)
+    hollihop_last_synced_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ('classroom', 'user')

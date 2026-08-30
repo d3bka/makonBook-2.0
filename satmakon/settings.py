@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 import os
 from urllib.parse import urlparse, parse_qs, unquote
 from dotenv import load_dotenv
@@ -88,6 +88,7 @@ INSTALLED_APPS = [
     "apps.sat.apps.SatConfig",
     "apps.apclasses.apps.ApClassesConfig",
     "apps.ratings.apps.RatingsConfig",
+    "apps.integrations.apps.IntegrationsConfig",
     "apps.telegram_bot",
 ]
 
@@ -100,6 +101,7 @@ MIDDLEWARE = [
     "apps.base.middleware.MakonErrorPageMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.base.middleware.TemporaryPasswordChangeMiddleware",
     "allauth.account.middleware.AccountMiddleware",
     "apps.sat.middleware.ClientSoftwareMiddleware",
     "apps.sat.middleware.RequestTimeoutMiddleware",
@@ -278,6 +280,12 @@ TEST_IMPORT_SUBMIT_COOLDOWN_SECONDS = int(os.getenv("TEST_IMPORT_SUBMIT_COOLDOWN
 TEST_IMPORT_RATE_LIMIT_MAX = int(os.getenv("TEST_IMPORT_RATE_LIMIT_MAX", "6"))
 TEST_IMPORT_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("TEST_IMPORT_RATE_LIMIT_WINDOW_SECONDS", "600"))
 
+# Classroom join-code throttling. Per-user limits stop brute force without
+# locking an entire school behind one NAT/public IP.
+CLASSROOM_JOIN_USER_MAX_ATTEMPTS = max(3, int(os.getenv("CLASSROOM_JOIN_USER_MAX_ATTEMPTS", "10")))
+CLASSROOM_JOIN_IP_MAX_ATTEMPTS = max(20, int(os.getenv("CLASSROOM_JOIN_IP_MAX_ATTEMPTS", "100")))
+CLASSROOM_JOIN_RATE_WINDOW_SECONDS = max(60, int(os.getenv("CLASSROOM_JOIN_RATE_WINDOW_SECONDS", "600")))
+
 # Shared Redis counters in production; zero-setup in-memory counters in local
 # DEBUG mode. Set REGISTRATION_RATE_LIMIT_CACHE_URL explicitly to use Redis
 # while running Django directly from a local virtualenv.
@@ -301,7 +309,9 @@ else:
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.redis.RedisCache",
-            "LOCATION": "redis://redis:6379/3",
+            # MakonBook production currently runs without Docker. Override
+            # REGISTRATION_RATE_LIMIT_CACHE_URL when Redis is remote.
+            "LOCATION": os.getenv("MAKONBOOK_CACHE_URL", "redis://127.0.0.1:6379/3"),
             "KEY_PREFIX": "makonbook",
         }
     }
@@ -431,7 +441,7 @@ LOGIN_REDIRECT_URL = 'sat_menu'
 LOGOUT_REDIRECT_URL = '/login/'
 
 AUTHENTICATION_BACKENDS = [
-    "django.contrib.auth.backends.ModelBackend",
+    "apps.base.auth_backends.EmailOrPhoneModelBackend",
     "allauth.account.auth_backends.AuthenticationBackend",
 ]
 
@@ -471,10 +481,117 @@ SOCIALACCOUNT_PROVIDERS = {
     }
 }
 
+
+# Hollihop administrative-data integration.
+# `holihop` is accepted as an alias because it is commonly typed that way.
+SCHOOL_DATA_PROVIDER = env_str("SCHOOL_DATA_PROVIDER", "local").lower()
+if SCHOOL_DATA_PROVIDER == "holihop":
+    SCHOOL_DATA_PROVIDER = "hollihop"
+if SCHOOL_DATA_PROVIDER not in {"local", "hollihop"}:
+    raise RuntimeError("SCHOOL_DATA_PROVIDER must be local, holihop, or hollihop.")
+
+HOLLIHOP_MODE = env_str("HOLLIHOP_MODE", "users").lower()
+if HOLLIHOP_MODE not in {"users", "corporative", "all"}:
+    raise RuntimeError("HOLLIHOP_MODE must be users, corporative, or all.")
+HOLLIHOP_ENABLED = env_bool("HOLLIHOP_ENABLED", True)
+HOLLIHOP_API_URL = env_str("HOLLIHOP_API_URL", "")
+HOLLIHOP_AUTH_KEY = env_str("HOLLIHOP_AUTH_KEY", "")
+HOLLIHOP_WEBHOOK_SECRET = env_str("HOLLIHOP_WEBHOOK_SECRET", "")
+HOLLIHOP_TIMEOUT_SECONDS = max(3, int(os.getenv("HOLLIHOP_TIMEOUT_SECONDS", "20")))
+HOLLIHOP_MAX_RETRIES = max(0, min(5, int(os.getenv("HOLLIHOP_MAX_RETRIES", "3"))))
+HOLLIHOP_PAGE_SIZE = max(1, min(10000, int(os.getenv("HOLLIHOP_PAGE_SIZE", "1000"))))
+HOLLIHOP_MAX_PAGES = max(5, min(1000, int(os.getenv("HOLLIHOP_MAX_PAGES", "100"))))
+# Hollihop support reported a hard limit of 600 requests / 30 seconds. 0.10s
+# keeps one MakonBook sync worker comfortably below that ceiling, including
+# targeted dependency fetches after a delta is discovered.
+HOLLIHOP_MIN_REQUEST_INTERVAL = max(0.05, float(os.getenv("HOLLIHOP_MIN_REQUEST_INTERVAL", "0.20")))
+HOLLIHOP_RECENT_ATTENDANCE_DAYS = max(1, int(os.getenv("HOLLIHOP_RECENT_ATTENDANCE_DAYS", "30")))
+HOLLIHOP_ATTENDANCE_CHUNK_DAYS = max(1, min(90, int(os.getenv("HOLLIHOP_ATTENDANCE_CHUNK_DAYS", "30"))))
+HOLLIHOP_SYNC_LOCK_MINUTES = max(5, int(os.getenv("HOLLIHOP_SYNC_LOCK_MINUTES", "30")))
+HOLLIHOP_WEBHOOK_RATE_LIMIT = max(10, int(os.getenv("HOLLIHOP_WEBHOOK_RATE_LIMIT", "120")))
+
+# Smart reconciliation. There is deliberately NO sync-on-startup. The first
+# import is started explicitly from Manager Panel; only after it succeeds does
+# the lightweight 5-minute reconciliation become active for that database.
+HOLLIHOP_SYNC_INTERVAL_MINUTES = max(1, int(os.getenv("HOLLIHOP_SYNC_INTERVAL_MINUTES", "5")))
+HOLLIHOP_TEACHER_POLL_MINUTES = max(5, int(os.getenv("HOLLIHOP_TEACHER_POLL_MINUTES", "5")))
+HOLLIHOP_MANAGER_POLL_MINUTES = max(10, int(os.getenv("HOLLIHOP_MANAGER_POLL_MINUTES", "15")))
+# GetEdUnitStudents is Hollihop's heavy endpoint. The automatic full relation
+# sweep is intentionally limited to several times/day and always queryDays=False.
+HOLLIHOP_MEMBERSHIP_SWEEP_MINUTES = max(60, int(os.getenv("HOLLIHOP_MEMBERSHIP_SWEEP_MINUTES", "360")))
+HOLLIHOP_STUDENT_PROFILE_SWEEP_MINUTES = max(120, int(os.getenv("HOLLIHOP_STUDENT_PROFILE_SWEEP_MINUTES", "360")))
+HOLLIHOP_EDUNIT_CATALOG_SWEEP_MINUTES = max(120, int(os.getenv("HOLLIHOP_EDUNIT_CATALOG_SWEEP_MINUTES", "360")))
+HOLLIHOP_ATTENDANCE_DELTA_DAYS = max(1, min(30, int(os.getenv("HOLLIHOP_ATTENDANCE_DELTA_DAYS", "7"))))
+HOLLIHOP_ATTENDANCE_SWEEP_MINUTES = max(360, int(os.getenv("HOLLIHOP_ATTENDANCE_SWEEP_MINUTES", "1440")))
+HOLLIHOP_CHECKPOINT_OVERLAP_SECONDS = max(0, min(600, int(os.getenv("HOLLIHOP_CHECKPOINT_OVERLAP_SECONDS", "120"))))
+# Full-sweep deletion circuit breaker. A truncated Hollihop response must not
+# mass-remove otherwise valid classroom memberships.
+HOLLIHOP_MAX_AUTOMATIC_MEMBERSHIP_REMOVALS = max(1, int(os.getenv("HOLLIHOP_MAX_AUTOMATIC_MEMBERSHIP_REMOVALS", "500")))
+HOLLIHOP_MAX_AUTOMATIC_MEMBERSHIP_REMOVAL_RATIO = max(0.01, min(1.0, float(os.getenv("HOLLIHOP_MAX_AUTOMATIC_MEMBERSHIP_REMOVAL_RATIO", "0.35"))))
+HOLLIHOP_MEMBERSHIP_REMOVAL_GUARD_MIN_POPULATION = max(1, int(os.getenv("HOLLIHOP_MEMBERSHIP_REMOVAL_GUARD_MIN_POPULATION", "50")))
+
+# Data synchronization and credential delivery are intentionally separated.
+# Keep the automatic gate false while Eskiz is in test mode.
+HOLLIHOP_SEND_CREDENTIALS = env_bool("HOLLIHOP_SEND_CREDENTIALS", False)
+HOLLIHOP_AUTO_SEND_CREDENTIALS = env_bool("HOLLIHOP_AUTO_SEND_CREDENTIALS", False)
+
+# Hollihop LearningType is separate from Type=Group/MiniGroup. Only ordinary
+# GROUP units enter MakonBook; ONLINE / IV ONLINE / IV OFFLINE are ignored.
+HOLLIHOP_ALLOWED_LEARNING_TYPES = tuple(env_list("HOLLIHOP_ALLOWED_LEARNING_TYPES", "GROUP"))
+
+# Backwards-compatible names for older settings/schedules. They no longer imply
+# an automatic full reconciliation; the beat normalization below removes legacy
+# Hollihop schedule entries and installs only the smart task.
+HOLLIHOP_RECONCILE_MINUTES = HOLLIHOP_SYNC_INTERVAL_MINUTES
+HOLLIHOP_FULL_RECONCILE_MINUTES = max(60, int(os.getenv("HOLLIHOP_FULL_RECONCILE_MINUTES", "360")))
+HOLLIHOP_CLASSROOM_TYPE = env_str("HOLLIHOP_CLASSROOM_TYPE", "sat").lower()
+if HOLLIHOP_CLASSROOM_TYPE not in {"sat", "ap"}:
+    raise RuntimeError("HOLLIHOP_CLASSROOM_TYPE must be sat or ap.")
+HOLLIHOP_FALLBACK_TEACHER_USERNAME = env_str("HOLLIHOP_FALLBACK_TEACHER_USERNAME", "")
+# GetEmployees does not document a dedicated permission field, so MakonBook
+# accepts the commonly returned role/type/position fields and only promotes
+# employees matching these explicit markers. This avoids making every employee
+# a Manager. Override the list if your Hollihop tenant uses a custom label.
+HOLLIHOP_MANAGER_TYPES = {
+    item.casefold() for item in env_list(
+        "HOLLIHOP_MANAGER_TYPES",
+        "Admin,Administrator,CEO,Chief Executive Officer,Админ,Администратор",
+    )
+}
+HOLLIHOP_ACTIVE_STUDENT_STATUSES = {
+    item.casefold() for item in env_list("HOLLIHOP_ACTIVE_STUDENT_STATUSES", "Занимается,Active,Working")
+}
+HOLLIHOP_INACTIVE_STUDENT_STATUSES = {
+    item.casefold() for item in env_list(
+        "HOLLIHOP_INACTIVE_STUDENT_STATUSES",
+        "Inactive,Archived,Stopped studying,Не занимается,Архив,Закончил обучение",
+    )
+}
+
+# SMS provider abstraction. Keep disabled until the provider account, sender and
+# operator-approved templates are ready. Supported: disabled, generic_http, eskiz.
+MAKONBOOK_SMS_PROVIDER = env_str("MAKONBOOK_SMS_PROVIDER", "disabled").lower()
+MAKONBOOK_SMS_API_URL = env_str("MAKONBOOK_SMS_API_URL", "")
+MAKONBOOK_SMS_API_TOKEN = env_str("MAKONBOOK_SMS_API_TOKEN", "")
+MAKONBOOK_SMS_SENDER = env_str("MAKONBOOK_SMS_SENDER", "MakonBook")
+MAKONBOOK_SMS_TIMEOUT_SECONDS = max(3, int(os.getenv("MAKONBOOK_SMS_TIMEOUT_SECONDS", "15")))
+
+# Native Eskiz.uz adapter. Credentials stay in environment variables only.
+ESKIZ_API_BASE_URL = env_str("ESKIZ_API_BASE_URL", "https://notify.eskiz.uz/api").rstrip("/")
+ESKIZ_AUTH_URL = env_str("ESKIZ_AUTH_URL", f"{ESKIZ_API_BASE_URL}/auth/login")
+ESKIZ_SEND_URL = env_str("ESKIZ_SEND_URL", f"{ESKIZ_API_BASE_URL}/message/sms/send")
+ESKIZ_EMAIL = env_str("ESKIZ_EMAIL", "")
+ESKIZ_PASSWORD = env_str("ESKIZ_PASSWORD", "")
+ESKIZ_SENDER = env_str("ESKIZ_SENDER", "4546")
+ESKIZ_CALLBACK_URL = env_str("ESKIZ_CALLBACK_URL", "")
+# Shared Django cache (Redis in production) prevents authenticating before each SMS.
+# A 6-hour cache is deliberately conservative; HTTP 401 triggers one forced refresh.
+ESKIZ_TOKEN_CACHE_SECONDS = max(60, int(os.getenv("ESKIZ_TOKEN_CACHE_SECONDS", "21600")))
+
 # Celery / Redis remain available for unrelated background tasks (for example video conversion).
 # Structured Test Import does NOT enqueue Celery jobs and does not require Redis.
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1")
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2")
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/1")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/2")
 CELERY_TASK_TRACK_STARTED = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
@@ -483,6 +600,25 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+
+CELERY_BEAT_SCHEDULE = {
+    "hollihop-periodic-reconciliation": {
+        "task": "apps.integrations.hollihop.tasks.reconcile_hollihop",
+        "schedule": HOLLIHOP_RECONCILE_MINUTES * 60.0,
+    },
+}
+
+# BEGIN MAKONBOOK HOLLIHOP SMART BEAT
+# Preserve unrelated Celery Beat jobs, remove only legacy Hollihop schedules,
+# then install the single low-load smart reconciliation task.
+for _hollihop_beat_key in list(CELERY_BEAT_SCHEDULE):
+    if _hollihop_beat_key.startswith("hollihop-"):
+        CELERY_BEAT_SCHEDULE.pop(_hollihop_beat_key, None)
+CELERY_BEAT_SCHEDULE["hollihop-smart-reconciliation"] = {
+    "task": "apps.integrations.hollihop.tasks.smart_reconcile_hollihop",
+    "schedule": HOLLIHOP_SYNC_INTERVAL_MINUTES * 60.0,
+}
+# END MAKONBOOK HOLLIHOP SMART BEAT
 
 # AI is used for administrator/manager-run question-bank audits.
 # Structured-PDF imports themselves are deterministic and do not require an AI provider.
@@ -519,3 +655,4 @@ elif QUESTION_AUDIT_PROVIDER == "openai" and TEST_IMPORT_AUDIT_MODEL.startswith(
     TEST_IMPORT_AUDIT_MODEL = QUESTION_AUDIT_MODEL
 TEST_IMPORT_TIMEOUT_SECONDS = int(os.getenv("TEST_IMPORT_TIMEOUT_SECONDS", "180"))
 TEST_IMPORT_RUN_AI_AUDIT = os.getenv("TEST_IMPORT_RUN_AI_AUDIT", "1").strip().lower() not in {"0", "false", "no", "off"}  # CLI/legacy opt-in only; web import never auto-audits.
+

@@ -1,4 +1,4 @@
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Group, User
 from django.test import TestCase
 from django.urls import NoReverseMatch, reverse
 
@@ -24,6 +24,8 @@ class DashboardRemovalV26Tests(TestCase):
 
     def test_support_teacher_sat_entry_opens_planner(self):
         user = User.objects.create_user(username="support_home_v26", password="pass123")
+        support_group, _ = Group.objects.get_or_create(name="Support Teacher")
+        user.groups.add(support_group)
         SupportTeacherProfile.objects.create(user=user, display_name="Support V26", is_active=True)
         self.client.force_login(user)
         response = self.client.get(reverse("sat_menu"))

@@ -42,7 +42,7 @@ class EnglishAnswerMatchingTests(SimpleTestCase):
     def test_normalization_does_not_remove_internal_words(self):
         self.assertEqual(normalize_text_answer("  It’s   going—now. "), "it's going-now")
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Group, User
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -52,6 +52,8 @@ from .models import Classroom, ClassroomMembership
 class ClassroomApprovalVisibilityTests(TestCase):
     def setUp(self):
         self.teacher = User.objects.create_user(username="teacher1", password="pass123", is_staff=True)
+        teacher_group, _ = Group.objects.get_or_create(name="Teacher")
+        self.teacher.groups.add(teacher_group)
         self.student = User.objects.create_user(username="student1", password="pass123")
         self.classroom = Classroom.objects.create(
             teacher=self.teacher,
@@ -104,6 +106,8 @@ from .models import (
 class VocabularyLearningProgressTests(TestCase):
     def setUp(self):
         self.teacher = User.objects.create_user(username='vocab_teacher', password='pass123')
+        teacher_group, _ = Group.objects.get_or_create(name='Teacher')
+        self.teacher.groups.add(teacher_group)
         self.student = User.objects.create_user(username='vocab_student', password='pass123')
         self.classroom = Classroom.objects.create(
             teacher=self.teacher,

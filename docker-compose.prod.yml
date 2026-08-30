@@ -96,6 +96,31 @@ services:
       redis:
         condition: service_healthy
 
+
+  celery-beat:
+    image: ${APP_IMAGE:-nazacd/makonbook:latest}
+    pull_policy: always
+    restart: always
+    container_name: makonbook-celery-beat
+    command: celery -A satmakon beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
+    volumes:
+      - logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      DB_ENGINE: django.db.backends.postgresql
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      RUN_MIGRATIONS: 0
+      COLLECTSTATIC_ON_START: 0
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+    networks:
+      - sat_makon_network
+    depends_on:
+      redis:
+        condition: service_healthy
+
   telegram-bot:
     image: ${APP_IMAGE:-nazacd/makonbook:latest}
     pull_policy: always

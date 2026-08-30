@@ -545,7 +545,7 @@ class TestModuleAdmin(admin.ModelAdmin):
                 answers_data = json.loads(obj.answers)
                 count = len(answers_data.get('answers', []))
                 return format_html('<strong>{}</strong> answers', count)
-            except:
+            except (json.JSONDecodeError, TypeError, AttributeError):
                 return 'Invalid JSON'
         return '0 answers'
     answers_count.short_description = 'Answers'
@@ -570,7 +570,7 @@ class TestModuleAdmin(admin.ModelAdmin):
                 answers_data = json.loads(obj.answers)
                 preview = json.dumps(answers_data, indent=2)[:500]
                 return format_html('<pre style="font-size: 11px;">{}</pre>', preview)
-            except:
+            except (json.JSONDecodeError, TypeError, AttributeError):
                 return 'Invalid JSON format'
         return 'No answers recorded'
     answers_preview.short_description = 'Answers Preview'
