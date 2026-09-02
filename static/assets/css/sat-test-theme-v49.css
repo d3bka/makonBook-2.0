@@ -1,0 +1,407 @@
+/* MakonBook SAT Test Runner theme bridge v49
+   Keeps the live test on the same light/dark/system theme as the rest of MakonBook.
+   Loaded after legacy test CSS so it can safely neutralize the old dark-only rules. */
+
+html[data-theme="light"] body.github-test-template-v20 {
+  --exam-bg: #f7f4ff;
+  --exam-panel: #ffffff;
+  --exam-panel-soft: #f5f0ff;
+  --exam-border: rgba(109, 40, 217, .18);
+  --exam-text: #211638;
+  --exam-muted: #665d78;
+  background:
+    radial-gradient(circle at top left, rgba(124, 58, 237, .10), transparent 34%),
+    radial-gradient(circle at top right, rgba(236, 72, 153, .07), transparent 28%),
+    linear-gradient(180deg, #fcfbff 0%, #f7f4ff 100%) !important;
+  color: var(--exam-text) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 header,
+html[data-theme="light"] body.github-test-template-v20 footer,
+html[data-theme="light"] body.github-test-template-v20 .question-container,
+html[data-theme="light"] body.github-test-template-v20 .answers-container {
+  background: rgba(255, 255, 255, .94) !important;
+  border-color: rgba(109, 40, 217, .16) !important;
+  color: var(--exam-text) !important;
+  box-shadow: 0 18px 48px rgba(76, 29, 149, .09) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .github-test-heading h1,
+html[data-theme="light"] body.github-test-template-v20 .timer,
+html[data-theme="light"] body.github-test-template-v20 #passage,
+html[data-theme="light"] body.github-test-template-v20 #question-text,
+html[data-theme="light"] body.github-test-template-v20 .question-text,
+html[data-theme="light"] body.github-test-template-v20 .choice-container,
+html[data-theme="light"] body.github-test-template-v20 .choice-content {
+  color: var(--exam-text) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .github-test-heading small {
+  color: var(--exam-muted) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .test-save-status {
+  border-color: rgba(109, 40, 217, .14) !important;
+  background: rgba(109, 40, 217, .055) !important;
+  color: #675d79 !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .question-title {
+  background: linear-gradient(135deg, #faf8ff 0%, #f1ecff 100%) !important;
+  border-color: rgba(109, 40, 217, .14) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .bookmark,
+html[data-theme="light"] body.github-test-template-v20 .crossing-options {
+  background-color: rgba(109, 40, 217, .055) !important;
+  border-color: rgba(109, 40, 217, .14) !important;
+  color: #5b21b6 !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .bookmark.filledbook {
+  color: #4c1d95 !important;
+  background-color: rgba(109, 40, 217, .12) !important;
+  border-color: rgba(109, 40, 217, .24) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .choice-container {
+  background: #ffffff !important;
+  border-color: rgba(109, 40, 217, .18) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .choice-container:hover {
+  background: #fbf9ff !important;
+  border-color: rgba(124, 58, 237, .52) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .choice-input:checked + .choice-container,
+html[data-theme="light"] body.github-test-template-v20 .big-container.selected .choice-container {
+  background: #f4efff !important;
+  color: #271741 !important;
+  border-color: #7c3aed !important;
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, .10) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .mark {
+  background: #fff !important;
+  border-color: #9b91aa !important;
+  color: #4b4457 !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .choice-input:checked + .choice-container .mark,
+html[data-theme="light"] body.github-test-template-v20 .big-container.selected .mark {
+  background: #6d28d9 !important;
+  border-color: #6d28d9 !important;
+  color: #fff !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .crossing-zone {
+  background: rgba(255, 255, 255, .96) !important;
+  color: #4c1d95 !important;
+  border-color: rgba(109, 40, 217, .22) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .question-progress.nav-button {
+  background: #fff !important;
+  color: #4c1d95 !important;
+  border: 1px solid rgba(109, 40, 217, .20) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .question-progress.nav-button:hover {
+  background: #f1ecff !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .header-tool,
+html[data-theme="light"] body.github-test-template-v20 header > a[data-test-exit] {
+  color: #5b21b6 !important;
+  background: rgba(109, 40, 217, .07) !important;
+  border: 1px solid rgba(109, 40, 217, .15) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .header-tool:hover,
+html[data-theme="light"] body.github-test-template-v20 header > a[data-test-exit]:hover {
+  background: rgba(109, 40, 217, .12) !important;
+}
+
+/* Question overview */
+html[data-theme="light"] body.github-test-template-v20 .question-overview-modal,
+html[data-theme="light"] body.github-test-template-v20 .test-submit-progress {
+  background: rgba(41, 26, 67, .34) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .question-overview-card,
+html[data-theme="light"] body.github-test-template-v20 .test-flow-modal-card.finish-summary-card,
+html[data-theme="light"] body.github-test-template-v20 .test-submit-progress-card {
+  background: linear-gradient(155deg, rgba(255,255,255,.99), rgba(247,244,255,.99)) !important;
+  color: var(--exam-text) !important;
+  border-color: rgba(109, 40, 217, .18) !important;
+  box-shadow: 0 30px 90px rgba(53, 31, 86, .22) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .question-overview-header {
+  background: radial-gradient(circle at top left, rgba(124,58,237,.11), transparent 52%) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .question-overview-kicker,
+html[data-theme="light"] body.github-test-template-v20 .finish-summary-context {
+  color: #6d28d9 !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .question-overview-header h2,
+html[data-theme="light"] body.github-test-template-v20 .question-overview-header p,
+html[data-theme="light"] body.github-test-template-v20 .overview-stat strong,
+html[data-theme="light"] body.github-test-template-v20 .finish-summary-heading h2,
+html[data-theme="light"] body.github-test-template-v20 .finish-summary-progress-row strong,
+html[data-theme="light"] body.github-test-template-v20 .finish-summary-grid .finish-stat strong,
+html[data-theme="light"] body.github-test-template-v20 .finish-review-chip,
+html[data-theme="light"] body.github-test-template-v20 .test-submit-progress-card h2 {
+  color: var(--exam-text) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .question-overview-card .close-button,
+html[data-theme="light"] body.github-test-template-v20 .overview-stat,
+html[data-theme="light"] body.github-test-template-v20 .question-overview-card .rect-question,
+html[data-theme="light"] body.github-test-template-v20 .overview-return-button,
+html[data-theme="light"] body.github-test-template-v20 .finish-summary-progress,
+html[data-theme="light"] body.github-test-template-v20 .finish-summary-grid .finish-stat,
+html[data-theme="light"] body.github-test-template-v20 .finish-review-chip {
+  background: rgba(109, 40, 217, .045) !important;
+  color: var(--exam-text) !important;
+  border-color: rgba(109, 40, 217, .17) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .question-overview-card .rect-question.answered {
+  background: rgba(34, 197, 94, .10) !important;
+  border-color: rgba(22, 163, 74, .30) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .overview-stat,
+html[data-theme="light"] body.github-test-template-v20 .question-overview-legend,
+html[data-theme="light"] body.github-test-template-v20 .finish-summary-copy,
+html[data-theme="light"] body.github-test-template-v20 .finish-summary-progress-row,
+html[data-theme="light"] body.github-test-template-v20 .finish-summary-grid .finish-stat span,
+html[data-theme="light"] body.github-test-template-v20 .finish-summary-review-label,
+html[data-theme="light"] body.github-test-template-v20 .finish-review-chip span,
+html[data-theme="light"] body.github-test-template-v20 .test-submit-progress-card p {
+  color: var(--exam-muted) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .finish-summary-progress-track,
+html[data-theme="light"] body.github-test-template-v20 .test-submit-progress-line {
+  background: rgba(109, 40, 217, .09) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .finish-summary-warning {
+  color: #8a5700 !important;
+  background: rgba(245, 158, 11, .10) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .finish-summary-ready {
+  color: #147a43 !important;
+  background: rgba(34, 197, 94, .09) !important;
+}
+
+/* Text-entry cards already support dark mode; make the light state explicit. */
+html[data-theme="light"] body.github-test-template-v20 .sentence-answer-card,
+html[data-theme="light"] body.github-test-template-v20 .written-answer-card {
+  background: #fff !important;
+  border-color: rgba(109, 40, 217, .16) !important;
+  color: var(--exam-text) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .sentence-answer-input,
+html[data-theme="light"] body.github-test-template-v20 .written-answer-input {
+  background: #fff !important;
+  color: #1f2937 !important;
+  border-color: #cfc7dc !important;
+}
+
+/* Preserve a white paper canvas around academic visuals in both themes. */
+body.github-test-template-v20 .graph img,
+body.github-test-template-v20 #graph-container img,
+body.github-test-template-v20 .choice-image,
+body.github-test-template-v20 #passage img,
+body.github-test-template-v20 #question-text img {
+  background: #fff !important;
+}
+
+/* v49.1 — light-mode footer controls --------------------------------------
+   Legacy exam CSS gives secondary navigation white text on a translucent
+   dark surface. Once the runner correctly inherits Light Mode those controls
+   remain present but visually disappear against the white footer. Keep the
+   primary Next/Finish gradient, while rendering Back and annotation tools as
+   high-contrast secondary controls. */
+html[data-theme="light"] body.github-test-template-v20 .footer-right #clear-button,
+html[data-theme="light"] body.github-test-template-v20 .footer-right #pen-button,
+html[data-theme="light"] body.github-test-template-v20 .footer-right #backButton {
+  background: #ffffff !important;
+  color: #5b21b6 !important;
+  border: 1px solid rgba(109, 40, 217, .24) !important;
+  box-shadow: 0 5px 16px rgba(76, 29, 149, .08) !important;
+  opacity: 1 !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .footer-right #clear-button i,
+html[data-theme="light"] body.github-test-template-v20 .footer-right #pen-button i {
+  color: currentColor !important;
+  opacity: 1 !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .footer-right #clear-button:hover:not(:disabled),
+html[data-theme="light"] body.github-test-template-v20 .footer-right #pen-button:hover:not(:disabled),
+html[data-theme="light"] body.github-test-template-v20 .footer-right #backButton:hover:not(:disabled) {
+  background: #f3eeff !important;
+  color: #4c1d95 !important;
+  border-color: rgba(109, 40, 217, .42) !important;
+  box-shadow: 0 8px 20px rgba(76, 29, 149, .12) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .footer-right #clear-button:focus-visible,
+html[data-theme="light"] body.github-test-template-v20 .footer-right #pen-button:focus-visible,
+html[data-theme="light"] body.github-test-template-v20 .footer-right #backButton:focus-visible {
+  outline: 3px solid rgba(124, 58, 237, .22) !important;
+  outline-offset: 2px !important;
+}
+
+/* Keep the highlighter's active amber state stronger than the generic
+   secondary-control rule above. */
+html[data-theme="light"] body.github-test-template-v20 .footer-right #pen-button.active,
+html[data-theme="light"] body.github-test-template-v20.pen-mode .footer-right #pen-button,
+html[data-theme="light"] body.github-test-template-v20 .footer-right #pen-button[aria-pressed="true"] {
+  background: #fff7cc !important;
+  color: #7c4a03 !important;
+  border-color: rgba(202, 138, 4, .46) !important;
+  box-shadow: 0 0 0 4px rgba(250, 204, 21, .14), 0 6px 16px rgba(146, 64, 14, .10) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .footer-right #backButton:disabled,
+html[data-theme="light"] body.github-test-template-v20 .footer-right #clear-button:disabled,
+html[data-theme="light"] body.github-test-template-v20 .footer-right #pen-button:disabled {
+  background: #f5f2f8 !important;
+  color: #9a91a8 !important;
+  border-color: rgba(92, 75, 116, .13) !important;
+  box-shadow: none !important;
+  opacity: .62 !important;
+}
+
+
+/* v49.2 — timer + save-state readability ---------------------------------
+   The GitHub runner intentionally stripped the legacy timer chrome, which
+   leaves the countdown looking like loose text after Light Mode is restored.
+   Give the countdown and autosave state a compact, stable visual group in
+   both themes without changing timer logic. */
+body.github-test-template-v20 .github-test-timer-wrap {
+  gap: 6px !important;
+}
+
+body.github-test-template-v20 .github-test-timer-wrap .timer {
+  min-width: 94px !important;
+  min-height: 40px !important;
+  display: inline-grid !important;
+  place-items: center !important;
+  padding: 7px 14px !important;
+  border: 1px solid rgba(216, 180, 254, .30) !important;
+  border-radius: 14px !important;
+  background: rgba(255, 255, 255, .09) !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 22px rgba(15, 6, 35, .22) !important;
+  font-size: 22px !important;
+  font-weight: 850 !important;
+  line-height: 1 !important;
+  letter-spacing: .015em !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+body.github-test-template-v20 .github-test-timer-wrap .test-save-status {
+  min-height: 24px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 4px 10px !important;
+  border: 1px solid rgba(216, 180, 254, .18) !important;
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, .07) !important;
+  color: rgba(255, 255, 255, .78) !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+body.github-test-template-v20 .github-test-timer-wrap .save-status-dot {
+  flex: 0 0 auto !important;
+  width: 7px !important;
+  height: 7px !important;
+  border-radius: 50% !important;
+  background: #4ade80 !important;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, .14) !important;
+}
+
+body.github-test-template-v20 .github-test-timer-wrap .test-save-status[data-state="saving"] .save-status-dot {
+  background: #fbbf24 !important;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, .14) !important;
+}
+
+body.github-test-template-v20 .github-test-timer-wrap .test-save-status[data-state="offline"] .save-status-dot {
+  background: #fb7185 !important;
+  box-shadow: 0 0 0 3px rgba(251, 113, 133, .14) !important;
+}
+
+body.github-test-template-v20 .github-test-timer-wrap .timer.is-warning {
+  border-color: rgba(245, 158, 11, .70) !important;
+  background: rgba(245, 158, 11, .12) !important;
+  color: #fde68a !important;
+}
+
+body.github-test-template-v20 .github-test-timer-wrap .timer.is-critical {
+  border-color: rgba(248, 113, 113, .82) !important;
+  background: rgba(239, 68, 68, .14) !important;
+  color: #fecaca !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .github-test-timer-wrap .timer {
+  border-color: rgba(109, 40, 217, .20) !important;
+  background: #ffffff !important;
+  color: #2f1b49 !important;
+  box-shadow: 0 6px 18px rgba(76, 29, 149, .10) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .github-test-timer-wrap .test-save-status {
+  border-color: rgba(109, 40, 217, .16) !important;
+  background: #f7f3ff !important;
+  color: #665d78 !important;
+  box-shadow: 0 3px 10px rgba(76, 29, 149, .05) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .github-test-timer-wrap .timer.is-warning {
+  border-color: rgba(217, 119, 6, .48) !important;
+  background: #fff8e8 !important;
+  color: #92400e !important;
+  box-shadow: 0 6px 18px rgba(217, 119, 6, .10) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .github-test-timer-wrap .timer.is-critical {
+  border-color: rgba(220, 38, 38, .50) !important;
+  background: #fff0f0 !important;
+  color: #b91c1c !important;
+  box-shadow: 0 6px 18px rgba(220, 38, 38, .10) !important;
+}
+
+@media (max-width: 560px) {
+  body.github-test-template-v20 .github-test-timer-wrap .timer {
+    min-width: 78px !important;
+    min-height: 36px !important;
+    padding: 6px 10px !important;
+    border-radius: 12px !important;
+    font-size: 19px !important;
+  }
+
+  body.github-test-template-v20 .github-test-timer-wrap .test-save-status {
+    min-height: 20px !important;
+    padding: 3px 7px !important;
+  }
+}

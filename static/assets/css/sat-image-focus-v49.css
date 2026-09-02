@@ -1,0 +1,174 @@
+/* MakonBook SAT Image Focus v49 */
+body.github-test-template-v20 .sat-focusable-image {
+  cursor: zoom-in !important;
+  outline: none;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/* Legacy answer CSS disables pointer events on every child of a choice label.
+   Images are intentionally exempt so they can open Image Focus without selecting the answer. */
+body.github-test-template-v20 .choice-container .sat-focusable-image {
+  pointer-events: auto !important;
+}
+
+body.github-test-template-v20 .sat-focusable-image:focus-visible {
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, .24), 0 0 0 1px #7c3aed !important;
+  border-radius: 12px;
+}
+
+.sat-image-focus[hidden] { display: none !important; }
+.sat-image-focus {
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: rgba(9, 5, 18, .82);
+  backdrop-filter: blur(16px) saturate(1.08);
+  -webkit-backdrop-filter: blur(16px) saturate(1.08);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .18s ease, visibility .18s ease;
+}
+.sat-image-focus.is-open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.sat-image-focus__toolbar {
+  min-height: 72px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 12px clamp(14px, 2.5vw, 30px);
+  color: #fff;
+  background: rgba(16, 10, 31, .72);
+  border-bottom: 1px solid rgba(255, 255, 255, .10);
+}
+.sat-image-focus__title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 800 13px/1.2 Arial, sans-serif;
+  color: rgba(255,255,255,.86);
+}
+.sat-image-focus__title i { color: #c4b5fd; }
+.sat-image-focus__title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sat-image-focus__controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  border-radius: 16px;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.10);
+}
+.sat-image-focus__button {
+  min-width: 42px;
+  height: 42px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #fff;
+  font: 800 13px/1 Arial, sans-serif;
+  cursor: pointer;
+  transition: background .15s ease, transform .15s ease;
+}
+.sat-image-focus__button:hover,
+.sat-image-focus__button:focus-visible {
+  background: rgba(255,255,255,.13);
+  outline: none;
+}
+.sat-image-focus__button:active { transform: scale(.96); }
+.sat-image-focus__button--fit { min-width: 54px; }
+.sat-image-focus__zoom {
+  min-width: 58px;
+  text-align: center;
+  color: rgba(255,255,255,.82);
+  font: 800 12px/1 Arial, sans-serif;
+}
+.sat-image-focus__close {
+  justify-self: end;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.10);
+}
+
+.sat-image-focus__stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+}
+.sat-image-focus__stage.is-dragging { cursor: grabbing; }
+.sat-image-focus__paper {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform-origin: center center;
+  will-change: transform;
+  padding: clamp(10px, 1.5vw, 20px);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 30px 80px rgba(0,0,0,.36);
+}
+.sat-image-focus__image {
+  display: block;
+  max-width: none !important;
+  max-height: none !important;
+  width: auto !important;
+  height: auto !important;
+  margin: 0 !important;
+  object-fit: contain;
+  background: #fff !important;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.sat-image-focus__hint {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 9px 16px 11px;
+  border-top: 1px solid rgba(255,255,255,.08);
+  background: rgba(16, 10, 31, .62);
+  color: rgba(255,255,255,.66);
+  font: 700 11px/1.4 Arial, sans-serif;
+  text-align: center;
+}
+body.sat-image-focus-open { overflow: hidden !important; }
+
+@media (max-width: 720px) {
+  .sat-image-focus__toolbar {
+    min-height: 64px;
+    grid-template-columns: minmax(0,1fr) auto;
+    gap: 8px;
+    padding: 9px 10px;
+  }
+  .sat-image-focus__title { display: none; }
+  .sat-image-focus__controls { justify-self: start; }
+  .sat-image-focus__button { min-width: 38px; height: 38px; padding: 0 9px; }
+  .sat-image-focus__button--fit { min-width: 46px; }
+  .sat-image-focus__zoom { min-width: 49px; font-size: 11px; }
+  .sat-image-focus__hint { font-size: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sat-image-focus,
+  .sat-image-focus__button { transition: none !important; }
+}
