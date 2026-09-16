@@ -164,11 +164,30 @@
       answers.innerHTML = `
         <div class="written-answer-card">
           <label for="written-answer-${core.currentQuestionIndex}">Enter your answer</label>
-          <input id="written-answer-${core.currentQuestionIndex}" class="written-answer-input" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" maxlength="120" value="${escapeHtml(core.answers[core.currentQuestionIndex] || '')}" placeholder="Examples: 3, -2.5, 1/4">
-          <p>Equivalent decimals and fractions are accepted when the answer key allows them. Your response is saved automatically.</p>
+          <div class="written-answer-entry">
+            <input id="written-answer-${core.currentQuestionIndex}" class="written-answer-input" type="text" inputmode="text" enterkeyhint="done" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" maxlength="120" value="${escapeHtml(core.answers[core.currentQuestionIndex] || '')}" placeholder="Examples: 3, -2.5, 1/4" aria-describedby="written-answer-help-${core.currentQuestionIndex}">
+            <div class="written-answer-symbols" aria-label="Quick math symbols">
+              <button type="button" class="written-answer-symbol" data-written-symbol="/" aria-label="Insert slash">/</button>
+              <button type="button" class="written-answer-symbol" data-written-symbol="-" aria-label="Insert minus">−</button>
+              <button type="button" class="written-answer-symbol" data-written-symbol="." aria-label="Insert decimal point">.</button>
+            </div>
+          </div>
+          <p id="written-answer-help-${core.currentQuestionIndex}">Fractions such as 1/4 are supported. Your response is saved automatically.</p>
         </div>`;
-      answers.querySelector('.written-answer-input')?.addEventListener('input', (event) => {
+      const writtenInput = answers.querySelector('.written-answer-input');
+      writtenInput?.addEventListener('input', (event) => {
         core.setTextAnswer(event.target.value);
+      });
+      answers.querySelectorAll('[data-written-symbol]').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (!writtenInput) return;
+          const symbol = button.dataset.writtenSymbol || '';
+          const start = Number.isInteger(writtenInput.selectionStart) ? writtenInput.selectionStart : writtenInput.value.length;
+          const end = Number.isInteger(writtenInput.selectionEnd) ? writtenInput.selectionEnd : start;
+          writtenInput.setRangeText(symbol, start, end, 'end');
+          writtenInput.dispatchEvent(new Event('input', { bubbles: true }));
+          writtenInput.focus({ preventScroll: true });
+        });
       });
     } else {
       if (crossing) crossing.hidden = false;
