@@ -1387,3 +1387,275 @@ body.mk-test-window.github-test-template-v20 .question-overview-card .close-butt
   position: absolute !important;
   z-index: 3 !important;
 }
+
+/* v2.1 — phone test runner polish + mobile-safe written math answers. */
+body.mk-test-window.github-test-template-v20 .written-answer-entry {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: min(100%, 480px);
+}
+
+body.mk-test-window.github-test-template-v20 .written-answer-entry .written-answer-input {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+body.mk-test-window.github-test-template-v20 .written-answer-symbols {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+body.mk-test-window.github-test-template-v20 .written-answer-symbol {
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid var(--sat-border, rgba(148, 163, 184, .35));
+  border-radius: 12px;
+  background: var(--sat-panel, #fff);
+  color: var(--sat-text, #111827);
+  font: 800 19px/1 Inter, Arial, sans-serif;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+body.mk-test-window.github-test-template-v20 .written-answer-symbol:active {
+  transform: translateY(1px);
+}
+
+@media (max-width: 700px) and (orientation: portrait) {
+  body.mk-test-window.github-test-template-v20 {
+    --sat-header-h: 64px;
+    --sat-footer-h: 60px;
+  }
+
+  body.mk-test-window.github-test-template-v20.github-test-math,
+  body.mk-test-window.github-test-template-v20.github-test-english {
+    --sat-header-h: 64px;
+  }
+
+  body.mk-test-window.github-test-template-v20 header,
+  body.mk-test-window.github-test-template-v20.github-test-math header {
+    min-height: var(--sat-header-h) !important;
+    height: var(--sat-header-h) !important;
+    padding: max(6px, var(--sat-safe-top)) max(10px, var(--sat-safe-right)) 6px max(10px, var(--sat-safe-left)) !important;
+    grid-template-columns: minmax(0, 1fr) auto auto !important;
+    grid-template-rows: 1fr !important;
+    gap: 6px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .github-test-heading,
+  body.mk-test-window.github-test-template-v20.github-test-math .github-test-heading {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .github-test-timer-wrap,
+  body.mk-test-window.github-test-template-v20.github-test-math .github-test-timer-wrap {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .header-tools,
+  body.mk-test-window.github-test-template-v20.github-test-math .header-tools {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+    justify-self: end !important;
+    gap: 4px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .github-test-heading h1 {
+    font-size: clamp(12px, 3.6vw, 15px) !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .timer {
+    min-width: 61px !important;
+    padding: 6px 7px !important;
+    font-size: 15px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .header-tool,
+  body.mk-test-window.github-test-template-v20 header > a[data-test-exit]:not(.header-tool) {
+    width: 40px !important;
+    min-width: 40px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+    border-radius: 11px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 main,
+  body.mk-test-window.github-test-template-v20 #quiz-form > main,
+  body.mk-test-window.github-test-template-v20 #math-quiz-form > main {
+    height: calc(var(--sat-vvh) - var(--sat-layout-header-h, var(--sat-header-h)) - var(--sat-layout-footer-h, var(--sat-footer-h))) !important;
+    display: block !important;
+    padding: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.mk-test-window.github-test-template-v20 .question-container,
+  body.mk-test-window.github-test-template-v20 .answers-container {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    padding: 16px max(14px, var(--sat-safe-right)) 16px max(14px, var(--sat-safe-left)) !important;
+    scrollbar-gutter: auto;
+  }
+
+  body.mk-test-window.github-test-template-v20 .question-container {
+    border-right: 0 !important;
+    border-bottom: 1px solid rgba(148, 163, 184, .22) !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .answers-container {
+    padding-top: 14px !important;
+    padding-bottom: 28px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .question-title {
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    margin: -14px -14px 14px !important;
+    padding: 9px 14px !important;
+    min-height: 54px !important;
+    background: color-mix(in srgb, var(--sat-shell, #fff) 94%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(148, 163, 184, .16);
+  }
+
+  body.mk-test-window.github-test-template-v20 .choice-container,
+  body.mk-test-window.github-test-template-v20 label.choice-container {
+    min-height: 58px !important;
+    padding-top: 12px !important;
+    padding-bottom: 12px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 footer {
+    height: var(--sat-footer-h) !important;
+    min-height: var(--sat-footer-h) !important;
+    padding: 7px max(9px, var(--sat-safe-right)) max(7px, var(--sat-safe-bottom)) max(9px, var(--sat-safe-left)) !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    grid-template-rows: 44px !important;
+    gap: 7px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .footer-center {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    width: auto !important;
+    justify-self: start !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .footer-right {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    justify-self: stretch !important;
+    display: flex !important;
+    justify-content: flex-end !important;
+    gap: 5px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .question-progress {
+    width: auto !important;
+    min-width: 104px !important;
+    max-width: 122px !important;
+    height: 44px !important;
+    padding-inline: 8px !important;
+    font-size: 11px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .footer-right .nav-button {
+    width: auto !important;
+    min-width: 66px !important;
+    max-width: 92px !important;
+    height: 44px !important;
+    padding-inline: 8px !important;
+    font-size: 11px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 #clear-button,
+  body.mk-test-window.github-test-template-v20 #pen-button {
+    width: 44px !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    padding: 0 !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .written-answer-card {
+    padding: 14px !important;
+    border-radius: 16px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .written-answer-entry {
+    width: 100%;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  body.mk-test-window.github-test-template-v20 .written-answer-input {
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 52px;
+    font-size: 18px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .written-answer-symbols {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  body.mk-test-window.github-test-template-v20 .written-answer-symbol {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+  }
+
+  body.mk-test-window.github-test-template-v20.sat-keyboard-open footer {
+    display: none !important;
+  }
+
+  body.mk-test-window.github-test-template-v20.sat-keyboard-open main,
+  body.mk-test-window.github-test-template-v20.sat-keyboard-open #quiz-form > main,
+  body.mk-test-window.github-test-template-v20.sat-keyboard-open #math-quiz-form > main {
+    height: calc(var(--sat-vvh) - var(--sat-layout-header-h, var(--sat-header-h))) !important;
+  }
+}
+
+@media (max-width: 390px) and (orientation: portrait) {
+  body.mk-test-window.github-test-template-v20 .github-test-heading h1 {
+    max-width: 88px;
+  }
+
+  body.mk-test-window.github-test-template-v20 .header-tools {
+    gap: 3px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .header-tool,
+  body.mk-test-window.github-test-template-v20 header > a[data-test-exit]:not(.header-tool) {
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 38px !important;
+    min-height: 38px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .question-progress {
+    min-width: 94px !important;
+    max-width: 104px !important;
+    font-size: 10px !important;
+  }
+
+  body.mk-test-window.github-test-template-v20 .footer-right .nav-button {
+    min-width: 58px !important;
+    padding-inline: 6px !important;
+  }
+}
