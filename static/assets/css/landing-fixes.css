@@ -606,20 +606,109 @@ html[data-theme="light"] .site-header.is-scrolled {
   html:not([data-theme="light"]) body .landing-shell > .site-header,
   html:not([data-theme="light"]) body .landing-shell > .site-header.is-scrolled,
   html:not([data-theme="light"]) body .landing-shell > .site-header:has(.site-nav.is-open) {
-    background: linear-gradient(105deg, #21163f 0%, #221a43 27%, #201d45 58%, #151b38 100%) !important;
+    background: linear-gradient(105deg, #302450 0%, #28274e 53%, #1e2b49 100%) !important;
   }
 }
 
-
-/* v68 — keep the mobile header visible when the menu is opened after scrolling.
-   Legacy landing.css sets body:has(.site-nav.is-open) { overflow: hidden; }.
-   That turns body into the sticky header's scrolling ancestor. When the menu
-   is portaled to body, its header can scroll off-screen. Do not change body
-   scrolling here: the nav has its own overflow-y:auto and overscroll-behavior. */
+/* v67 — landing mobile header, navigation and floating-action repair.
+   Loaded LAST from templates/landing/home.html; no global site CSS changed. */
 @media (max-width: 1024px) {
-  html body.landing-menu-open,
-  html body:has(.site-nav.is-open) {
+  /* An explicit viewport header avoids sticky failing inside the clipped landing
+     wrapper when html/body have conflicting overflow values. Reserve its space. */
+  html {
+    scrollbar-gutter: auto !important;
+  }
+
+  html body .landing-shell {
+    padding-top: var(--landing-header-height, 66px) !important;
+  }
+
+  html body .landing-shell > header.site-header,
+  html body .landing-shell > header.site-header.is-scrolled {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: auto !important;
+    width: 100% !important;
+    height: var(--landing-header-height, 66px) !important;
+    min-height: var(--landing-header-height, 66px) !important;
+    padding: 10px 0 !important;
+    margin: 0 !important;
+    z-index: 2147482998 !important;
+    overflow: visible !important;
+    transform: none !important;
+    contain: none !important;
+    isolation: auto !important;
+    background: linear-gradient(105deg, #302450 0%, #28274e 53%, #1e2b49 100%) !important;
+    background-color: #28274e !important;
+    border-bottom: 1px solid rgba(193, 168, 255, .20) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    box-shadow: 0 8px 22px rgba(12, 7, 29, .14) !important;
+  }
+
+  /* The earlier landing.css locks body overflow via :has(.site-nav.is-open),
+     which breaks fixed/sticky behavior after opening the portaled menu. */
+  html body.landing-menu-open {
     overflow-x: clip !important;
     overflow-y: visible !important;
+  }
+
+  /* Keep the navigation overlay just below the persistent header. */
+  html body > .site-nav.landing-mobile-nav-portal {
+    top: max(var(--landing-mobile-nav-top, 74px), calc(var(--landing-header-height, 66px) + 8px)) !important;
+  }
+
+  html[data-theme="light"] body .landing-shell > header.site-header,
+  html[data-theme="light"] body .landing-shell > header.site-header.is-scrolled {
+    background: linear-gradient(105deg, #ffffff 0%, #f9f6ff 55%, #f4f5ff 100%) !important;
+    background-color: #ffffff !important;
+    border-bottom-color: rgba(109, 40, 217, .14) !important;
+    box-shadow: 0 8px 20px rgba(76, 29, 149, .07) !important;
+  }
+
+  /* General issue-report script also attempts dynamic stacking; use explicit
+     bottom offsets so the two fixed buttons cannot cover each other. */
+  html body .landing-shell .back-to-top {
+    right: max(14px, env(safe-area-inset-right)) !important;
+    bottom: calc(84px + env(safe-area-inset-bottom)) !important;
+    left: auto !important;
+    width: 52px !important;
+    height: 52px !important;
+    z-index: 100 !important;
+  }
+
+  html body .issue-report-fab {
+    right: max(14px, env(safe-area-inset-right)) !important;
+    bottom: calc(16px + env(safe-area-inset-bottom)) !important;
+    left: auto !important;
+    z-index: 9997 !important;
+  }
+
+  html body.landing-menu-open .landing-shell .back-to-top,
+  html body.landing-menu-open .issue-report-fab {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+}
+
+/* Landing-only overflow correction: desktop sticky headers also need the body
+   not to become a second scrolling box through overflow-x: hidden. */
+html body:has(> .landing-shell) {
+  overflow-x: clip !important;
+  overflow-y: visible !important;
+}
+
+@media (min-width: 1025px) {
+  html body .landing-shell .back-to-top {
+    right: 22px !important;
+    bottom: 104px !important;
+  }
+
+  html body .issue-report-fab {
+    right: 22px !important;
+    bottom: 22px !important;
   }
 }
