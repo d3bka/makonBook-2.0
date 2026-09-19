@@ -770,3 +770,43 @@ html[data-theme="dark"] body.github-test-template-v20 #pen-button.active {
   background: rgba(250, 204, 21, .14) !important;
   border-color: rgba(253, 224, 71, .30) !important;
 }
+
+
+/* v55 — cleaner eliminate-answer icons ----------------------------------- */
+body.github-test-template-v20 .crossing-zone {
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(216, 180, 254, .18) !important;
+  background: linear-gradient(180deg, rgba(30, 18, 55, .74), rgba(18, 11, 34, .78)) !important;
+  color: rgba(255,255,255,.94) !important;
+  font-size: 16px !important;
+  line-height: 1 !important;
+  box-shadow: none !important;
+  backdrop-filter: blur(8px);
+}
+
+body.github-test-template-v20 .crossing-zone:hover {
+  transform: translateY(-50%) scale(1.04) !important;
+  background: linear-gradient(135deg, rgba(236,72,153,.20), rgba(124,58,237,.18)) !important;
+  border-color: rgba(236,72,153,.42) !important;
+}
+
+body.github-test-template-v20 .big-container.is-eliminated .crossing-zone {
+  background: linear-gradient(135deg, rgba(236,72,153,.22), rgba(124,58,237,.20)) !important;
+  border-color: rgba(236,72,153,.44) !important;
+}
+
+html[data-theme="light"] body.github-test-template-v20 .crossing-zone {
+  background: linear-gradient(180deg, #ffffff, #f7f3ff) !important;
+  color: #5b21b6 !important;
+  border-color: rgba(109, 40, 217, .18) !important;
+}
+
+@media (max-width: 640px) {
+  body.github-test-template-v20 .crossing-zone {
+    width: 32px !important;
+    height: 32px !important;
+    font-size: 15px !important;
+  }
+}

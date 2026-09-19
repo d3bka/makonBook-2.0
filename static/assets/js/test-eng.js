@@ -3,9 +3,11 @@
 
   function fixContent(value) {
     let raw = String(value == null ? '' : value)
-      .replace(/\\\$/g, '$')
-      .replace(/\\n/g, '\n')
-      .replace(/\\t/g, '\t');
+      .replace(/\\\$/g, '$');
+
+    /* v58: do not blindly decode \\n / \\t sequences here.
+       Those replacements corrupt LaTeX commands such as \\text, \\times,
+       \\neq and similar math content inside answer choices. */
 
     // Do not collapse literal double backslashes here. KaTeX uses `\\`
     // as a semantic row break inside aligned/system expressions. JSON/escapejs

@@ -1,0 +1,85 @@
+/* v53: Mark for Review uses a real SVG/icon and separate text node.
+   Loaded AFTER v51 and shared responsive styles to neutralize old bitmap
+   background and conflicting padding-inline, ::before, and font-size:0. */
+body.scroll-hide.mk-test-window.github-test-template-v20 .question-title button.bookmark {
+  grid-column: 2 !important;
+  align-self: center !important;
+  justify-self: stretch !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  margin: 0 !important;
+  padding: 0 14px !important;
+  gap: 10px !important;
+  border-radius: 14px !important;
+  background-image: none !important;
+  background-repeat: no-repeat !important;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  font-size: 13px !important;
+  line-height: 1.2 !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+body.scroll-hide.mk-test-window.github-test-template-v20 .question-title button.bookmark::before,
+body.scroll-hide.mk-test-window.github-test-template-v20 .question-title button.bookmark::after {
+  content: none !important;
+  display: none !important;
+}
+body.scroll-hide.mk-test-window.github-test-template-v20 .question-title button.bookmark .bookmark-icon {
+  position: static !important;
+  display: block !important;
+  flex: 0 0 18px !important;
+  width: 18px !important;
+  height: 18px !important;
+  min-width: 18px !important;
+  max-width: 18px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  pointer-events: none;
+}
+body.scroll-hide.mk-test-window.github-test-template-v20 .question-title button.bookmark .bookmark-label {
+  position: static !important;
+  display: block !important;
+  flex: 0 1 auto !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font: inherit !important;
+  line-height: inherit !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+body.scroll-hide.mk-test-window.github-test-template-v20 .question-title button.bookmark.filledbook .bookmark-icon {
+  fill: currentColor;
+}
+body.scroll-hide.mk-test-window.github-test-template-v20 .question-title button.bookmark:focus-visible {
+  outline: 2px solid #a78bfa !important;
+  outline-offset: 2px;
+}
+@media (max-width: 390px) {
+  body.scroll-hide.mk-test-window.github-test-template-v20 .question-title button.bookmark {
+    padding-inline: 9px !important;
+    gap: 7px !important;
+    font-size: 11px !important;
+  }
+  body.scroll-hide.mk-test-window.github-test-template-v20 .question-title button.bookmark .bookmark-icon {
+    width: 16px !important;
+    min-width: 16px !important;
+    max-width: 16px !important;
+    height: 16px !important;
+    flex-basis: 16px !important;
+  }
+}

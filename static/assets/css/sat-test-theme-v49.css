@@ -405,3 +405,34 @@ html[data-theme="light"] body.github-test-template-v20 .github-test-timer-wrap .
     padding: 3px 7px !important;
   }
 }
+
+
+/* v58 — keep long math answers readable on mobile ------------------------- */
+body.mk-test-window.github-test-template-v20 .choice-content,
+body.mk-test-window.github-test-template-v20 .choice-content .katex,
+body.mk-test-window.github-test-template-v20 .choice-content .katex-html {
+  max-width: 100%;
+}
+
+body.mk-test-window.github-test-template-v20 .choice-content .katex {
+  white-space: normal !important;
+}
+
+body.mk-test-window.github-test-template-v20 .choice-content .katex-display {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+
+body.mk-test-window.github-test-template-v20 .choice-content {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  body.mk-test-window.github-test-template-v20 .choice-content .katex {
+    font-size: 1.18em !important;
+  }
+}

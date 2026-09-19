@@ -1215,11 +1215,14 @@ body.mk-test-window label.choice-container {
   }
 
   body.mk-test-window .bookmark {
-    font-size: 0 !important;
-  }
-
-  body.mk-test-window .bookmark::before {
-    font-size: 1rem !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    font-size: .76rem !important;
+    line-height: 1.15 !important;
+    padding-left: 40px !important;
+    background-position: 12px center !important;
+    background-size: 18px 18px !important;
   }
 
   body.mk-test-window .nav-button,

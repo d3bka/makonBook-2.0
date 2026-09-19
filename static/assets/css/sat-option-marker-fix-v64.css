@@ -1,0 +1,21 @@
+/* v64: fix vertically displaced A/B/C/D glyphs in SAT answer circles.
+   Legacy makon-eng.css + makon-test-window.css generate a blank ::before
+   (content: attr(data-letter)) even though JS inserts the letter as real text.
+   In a display:grid marker that blank pseudo-element occupies the first row
+   and moves the real letter into a second row. Remove it, not just the margins. */
+@media (max-width: 700px) and (orientation: portrait) {
+  body.scroll-hide.mk-test-window.github-test-template-v20 #answers .choice-container .mark::before {
+    content: none !important;
+    display: none !important;
+  }
+
+  body.scroll-hide.mk-test-window.github-test-template-v20 #answers .choice-container .mark {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    place-items: center !important;
+    text-align: center !important;
+    padding: 0 !important;
+    line-height: 1 !important;
+  }
+}

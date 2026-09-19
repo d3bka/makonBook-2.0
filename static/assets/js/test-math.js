@@ -3,9 +3,11 @@
 
   function fixContent(value) {
     let raw = String(value == null ? '' : value)
-      .replace(/\\\$/g, '$')
-      .replace(/\\n/g, '\n')
-      .replace(/\\t/g, '\t');
+      .replace(/\\\$/g, '$');
+
+    // Preserve LaTeX commands such as \\text, \\times and \\neq.  Escape
+    // decoding occurred in the JSON transport; decoding \\n or \\t again
+    // here silently corrupts inline math in the answer options.
 
     // Do not collapse literal double backslashes here. KaTeX uses `\\`
     // as a semantic row break inside aligned/system expressions. JSON/escapejs
@@ -63,6 +65,32 @@
     else img.addEventListener('load', apply, { once: true });
   }
 
+  // The Math runner only needs a separate top panel for real passage or
+  // visual content. When neither exists, the question starts immediately
+  // under the header; restore the panel for the next passage/graph question.
+  function syncQuestionContext(passage, graph) {
+    const panel = document.querySelector('#math-quiz-form .question-container');
+    const visualSelector = 'img, svg, video, iframe, canvas, table, math, .sat-inline-blank';
+    const hasPassage = Boolean(passage && (
+      passage.textContent.trim() || passage.querySelector(visualSelector)
+    ));
+    const hasGraph = Boolean(graph && (
+      graph.textContent.trim() || graph.querySelector(visualSelector)
+    ));
+    const shouldShow = hasPassage || hasGraph;
+
+    // Preserve v54's responsive CSS and make hiding reliable even if a
+    // high-specificity layout rule assigns display/grid with !important.
+    document.body.classList.toggle('sat-math-no-context', !shouldShow);
+    if (!panel) return;
+    panel.hidden = !shouldShow;
+    if (shouldShow) {
+      panel.style.removeProperty('display');
+    } else {
+      panel.style.setProperty('display', 'none', 'important');
+    }
+  }
+
   function isWritten(core) {
     const question = core.questions[core.currentQuestionIndex] || {};
     return question.type === true || question.type === 'True' || question.written === true;
@@ -112,8 +140,8 @@
   function paintAnswer(core) {
     if (isWritten(core)) {
       const input = document.querySelector('.written-answer-input');
-      if (input && input.value !== String(core.answers[core.currentQuestionIndex] || '')) {
-        input.value = String(core.answers[core.currentQuestionIndex] || '');
+      if (input && input.value !== String(core.answers[core.currentQuestionIndex] ?? '')) {
+        input.value = String(core.answers[core.currentQuestionIndex] ?? '');
       }
       return;
     }
@@ -158,6 +186,7 @@
         : '';
       sizeQuestionVisual(graph.querySelector('img'));
     }
+    syncQuestionContext(passage, graph);
 
     if (isWritten(core)) {
       if (crossing) crossing.hidden = true;
@@ -165,26 +194,44 @@
         <div class="written-answer-card">
           <label for="written-answer-${core.currentQuestionIndex}">Enter your answer</label>
           <div class="written-answer-entry">
-            <input id="written-answer-${core.currentQuestionIndex}" class="written-answer-input" type="text" inputmode="text" enterkeyhint="done" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" maxlength="120" value="${escapeHtml(core.answers[core.currentQuestionIndex] || '')}" placeholder="Examples: 3, -2.5, 1/4" aria-describedby="written-answer-help-${core.currentQuestionIndex}">
+            <input id="written-answer-${core.currentQuestionIndex}" class="written-answer-input" name="written-answer" type="text" inputmode="text" enterkeyhint="done" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" maxlength="120" value="${escapeHtml(core.answers[core.currentQuestionIndex] ?? '')}" placeholder="e.g. 1/4 or -2.5" aria-label="Numeric answer; fractions allowed" aria-describedby="written-answer-help-${core.currentQuestionIndex}">
             <div class="written-answer-symbols" aria-label="Quick math symbols">
-              <button type="button" class="written-answer-symbol" data-written-symbol="/" aria-label="Insert slash">/</button>
+              <button type="button" class="written-answer-symbol" data-written-symbol="/" aria-label="Insert fraction slash" title="Fraction slash">/</button>
               <button type="button" class="written-answer-symbol" data-written-symbol="-" aria-label="Insert minus">−</button>
               <button type="button" class="written-answer-symbol" data-written-symbol="." aria-label="Insert decimal point">.</button>
             </div>
           </div>
-          <p id="written-answer-help-${core.currentQuestionIndex}">Fractions such as 1/4 are supported. Your response is saved automatically.</p>
+          <p id="written-answer-help-${core.currentQuestionIndex}">Use / for fractions (e.g. 1/4). Tap a symbol above if your phone keyboard hides it. Answers save automatically.</p>
         </div>`;
       const writtenInput = answers.querySelector('.written-answer-input');
-      writtenInput?.addEventListener('input', (event) => {
+      // A mobile button normally blurs the input first: keep the last caret/range
+      // so / is inserted where the student was typing instead of at the end.
+      let selection = { start: writtenInput.value.length, end: writtenInput.value.length };
+      const rememberSelection = () => {
+        if (typeof writtenInput.selectionStart === 'number') {
+          selection = { start: writtenInput.selectionStart, end: writtenInput.selectionEnd };
+        }
+      };
+      ['select', 'keyup', 'mouseup', 'touchend'].forEach((name) => {
+        writtenInput.addEventListener(name, rememberSelection);
+      });
+      writtenInput.addEventListener('input', (event) => {
+        rememberSelection();
         core.setTextAnswer(event.target.value);
       });
       answers.querySelectorAll('[data-written-symbol]').forEach((button) => {
+        // Keep the keyboard/caret stable when a touchscreen symbol is tapped.
+        button.addEventListener('pointerdown', (event) => {
+          if (event.pointerType !== 'mouse') event.preventDefault();
+        });
+        button.addEventListener('mousedown', (event) => event.preventDefault());
         button.addEventListener('click', () => {
-          if (!writtenInput) return;
           const symbol = button.dataset.writtenSymbol || '';
-          const start = Number.isInteger(writtenInput.selectionStart) ? writtenInput.selectionStart : writtenInput.value.length;
-          const end = Number.isInteger(writtenInput.selectionEnd) ? writtenInput.selectionEnd : start;
+          if (!symbol || writtenInput.disabled) return;
+          const start = Math.min(selection.start, writtenInput.value.length);
+          const end = Math.min(selection.end, writtenInput.value.length);
           writtenInput.setRangeText(symbol, start, end, 'end');
+          rememberSelection();
           writtenInput.dispatchEvent(new Event('input', { bubbles: true }));
           writtenInput.focus({ preventScroll: true });
         });
