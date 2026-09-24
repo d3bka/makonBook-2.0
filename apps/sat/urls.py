@@ -28,6 +28,7 @@ urlpatterns = [
     path('admin-panel/', include('apps.sat.urls_admin')),
 
     path('practice_tests/', views.practice_tests, name='practice_tests'),
+    path('api/test/initialize/', __import__('apps.sat.api_views', fromlist=['']).initialize_test, name='api_initialize_test'),
     path('vocabulary/', views.vocabulary, name='vocabulary'),
     path('admissions/', views.admissions, name='admissions'),
 

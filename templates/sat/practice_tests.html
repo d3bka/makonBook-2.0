@@ -7,6 +7,7 @@
 {% block title %}Practice Tests{% endblock title %}
 
 {% block style %}
+<link rel="stylesheet" href="{% static 'assets/css/makon-test-config.css' %}">
 <link rel="stylesheet" href="{% static 'assets/css/makon-practice-tests.css' %}?v=13">
 {% endblock style %}
 
@@ -332,4 +333,5 @@
 </div>
 
 <script src="{% static 'assets/js/makon-practice-tests.js' %}?v=12"></script>
+<script src="{% static 'assets/js/makon-test-config.js' %}"></script>
 {% endblock content %}

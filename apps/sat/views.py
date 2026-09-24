@@ -456,16 +456,16 @@ def _module_questions_queryset(test_obj, section, module):
     ).order_by('number', 'id')
 
 
-def _module_duration_seconds(user, section):
+def _module_duration_seconds(user, section, multiplier=1.0):
     section = _normalize_test_section(section)
     default_seconds = 1920 if section == 'english' else 2100
     if user.is_authenticated and user.groups.filter(name='OFFLINE').exists():
         profile, _ = UserProfile.objects.get_or_create(user=user)
         if section == 'english':
-            return max(int(profile.get_english_time_seconds() or default_seconds), 1)
+            return max(int(round((profile.get_english_time_seconds() or default_seconds) * multiplier)), 1)
         if section == 'math':
-            return max(int(profile.get_math_time_seconds() or default_seconds), 1)
-    return default_seconds
+            return max(int(round((profile.get_math_time_seconds() or default_seconds) * multiplier)), 1)
+    return max(int(round(default_seconds * multiplier)), 1)
 
 
 def _safe_json_list(value, expected_length=None, default_factory=list):
@@ -573,7 +573,7 @@ def _canonical_partial_makeup_answers(makeup_test, section, module, answers):
 
 
 def _ensure_makeup_module_draft(stage, section, module):
-    duration_seconds = _module_duration_seconds(stage.user, section)
+    duration_seconds = _module_duration_seconds(stage.user, section, multiplier=stage.time_multiplier or 1.0)
     draft, _ = MakeupTestModuleDraft.objects.get_or_create(
         user=stage.user,
         makeup_test=stage.makeup_test,
@@ -681,7 +681,7 @@ def _regular_module_redirect_url(test_obj, stage, classroom=None):
 
 
 def _ensure_regular_module_draft(stage, section, module, classroom=None):
-    duration_seconds = _module_duration_seconds(stage.user, section)
+    duration_seconds = _module_duration_seconds(stage.user, section, multiplier=stage.time_multiplier or 1.0)
     draft, created = TestModuleDraft.objects.get_or_create(
         user=stage.user,
         test=stage.test,
@@ -842,8 +842,8 @@ def _submit_regular_module_locked(stage, test_obj, classroom, section, module, c
     return module_obj, True
 
 
-def _required_modules_for_test(test_obj):
-    return get_test_sequence(test_obj)
+def _required_modules_for_test(test_obj, mode='full_test'):
+    return get_test_sequence(test_obj, mode=mode)
 
 
 def _section_submission_status(required_modules, missing_modules):
@@ -1228,7 +1228,9 @@ def _calculate_attempt_score(user, test_obj, attempt_id, classroom=None):
     if not attempt_id:
         return None
 
-    required_modules = _required_modules_for_test(test_obj)
+    stage = TestStage.objects.filter(user=user, test=test_obj, attempt_id=attempt_id).first()
+    mode = stage.mode if stage else 'full_test'
+    required_modules = _required_modules_for_test(test_obj, mode=mode)
     if not required_modules:
         return None
 
@@ -1273,17 +1275,6 @@ def _calculate_attempt_score(user, test_obj, attempt_id, classroom=None):
 
 
 def _completed_attempt_ids_from_modules(user, test_obj, classroom=None):
-    required_modules = _required_modules_for_test(test_obj)
-    if not required_modules:
-        return []
-
-    required_slots = {
-        (_normalize_test_section(section), _normalize_test_module(module))
-        for section, module in required_modules
-    }
-    slots_by_attempt = defaultdict(set)
-    latest_time_by_attempt = {}
-
     modules = TestModule.objects.filter(
         user=user,
         test=test_obj,
@@ -1292,17 +1283,18 @@ def _completed_attempt_ids_from_modules(user, test_obj, classroom=None):
         **_classroom_scope_filter(classroom),
     ).only('attempt_id', 'section', 'module', 'created_at', 'created')
 
+    slots_by_attempt = defaultdict(set)
+    latest_time_by_attempt = {}
+
     for module_obj in modules:
         attempt_id = module_obj.attempt_id
         if not attempt_id:
             continue
-
         slot = (
             _normalize_test_section(module_obj.section),
             _normalize_test_module(module_obj.module),
         )
         slots_by_attempt[attempt_id].add(slot)
-
         module_time = module_obj.created_at or module_obj.created
         if module_time and (
             attempt_id not in latest_time_by_attempt or
@@ -1310,12 +1302,27 @@ def _completed_attempt_ids_from_modules(user, test_obj, classroom=None):
         ):
             latest_time_by_attempt[attempt_id] = module_time
 
+    if not slots_by_attempt:
+        return []
+
+    stages = TestStage.objects.filter(attempt_id__in=slots_by_attempt.keys())
+    mode_by_attempt = {s.attempt_id: s.mode for s in stages}
+
     fallback_time = timezone.now() - timedelta(days=36500)
-    completed_attempt_ids = [
-        attempt_id
-        for attempt_id, slots in slots_by_attempt.items()
-        if required_slots.issubset(slots)
-    ]
+    completed_attempt_ids = []
+    
+    for attempt_id, slots in slots_by_attempt.items():
+        mode = mode_by_attempt.get(attempt_id, 'full_test')
+        req_modules = _required_modules_for_test(test_obj, mode=mode)
+        if not req_modules:
+            continue
+        required_slots = {
+            (_normalize_test_section(section), _normalize_test_module(module))
+            for section, module in req_modules
+        }
+        if required_slots.issubset(slots):
+            completed_attempt_ids.append(attempt_id)
+            
     completed_attempt_ids.sort(
         key=lambda attempt_id: latest_time_by_attempt.get(attempt_id) or fallback_time,
         reverse=True,
@@ -1419,9 +1426,22 @@ def _latest_regular_test_stage(user, test_obj, classroom=None):
     ).order_by('-updated_at', '-created_at', '-id').first()
 
 
-def _get_or_create_regular_test_stage(user, test_obj, *, stage=1, classroom=None):
+def _get_or_create_regular_test_stage(user, test_obj, *, stage=1, classroom=None, mode=None, time_multiplier=None):
     existing_stage = _latest_regular_test_stage(user, test_obj, classroom=classroom)
+    
     if existing_stage:
+        # Update existing config only if explicitly provided
+        update_fields = []
+        if mode is not None and existing_stage.mode != mode:
+            existing_stage.mode = mode
+            update_fields.append('mode')
+        if time_multiplier is not None and existing_stage.time_multiplier != time_multiplier:
+            existing_stage.time_multiplier = time_multiplier
+            update_fields.append('time_multiplier')
+            
+        if update_fields:
+            existing_stage.save(update_fields=update_fields)
+            
         return existing_stage, False
 
     return TestStage.objects.create(
@@ -1430,6 +1450,8 @@ def _get_or_create_regular_test_stage(user, test_obj, *, stage=1, classroom=None
         classroom=classroom,
         test_type='regular',
         stage=stage,
+        mode=mode or 'full_test',
+        time_multiplier=time_multiplier or 1.0,
     ), True
 
 
@@ -1469,7 +1491,7 @@ def _stage_attempt_is_complete(stage):
     if not stage or not stage.test_id:
         return False
 
-    sequence = get_test_sequence(stage.test)
+    sequence = get_test_sequence(stage.test, mode=stage.mode)
     if not sequence:
         return False
 
@@ -2349,11 +2371,15 @@ def results(request, test):
     has_english = test_mode in ['full', 'ebrw_only']
     has_math = test_mode in ['full', 'math_only']
 
-    required_modules = _required_modules_for_test(test_obj)
+    attempt_id = _resolve_attempt_id(user, test_obj, selected_review=selected_review, classroom=classroom)
+    
+    stage = TestStage.objects.filter(user=user, test=test_obj, attempt_id=attempt_id).first()
+    mode = stage.mode if stage else 'full_test'
+
+    required_modules = _required_modules_for_test(test_obj, mode=mode)
     if not required_modules:
         return HttpResponse("Questions are not found", status=404)
 
-    attempt_id = _resolve_attempt_id(user, test_obj, selected_review=selected_review, classroom=classroom)
     latest_modules = _load_latest_modules(user, test_obj, attempt_id=attempt_id, classroom=classroom)
 
     missing_modules = []
@@ -3019,14 +3045,14 @@ def module_test(request, pk):
     if not user_has_test_access(user, test):
         return HttpResponse("Permission Error")
 
+    # получаем stage
+    test_stage, created = _get_or_create_regular_test_stage(user, test, stage=1)
+
     # получаем последовательность модулей
-    sequence = get_test_sequence(test)
+    sequence = get_test_sequence(test, mode=test_stage.mode)
 
     if not sequence:
         return HttpResponse("Questions are not found")
-
-    # получаем stage
-    test_stage, created = _get_or_create_regular_test_stage(user, test, stage=1)
 
     # определяем текущий шаг
     current_step = get_current_test_step(test_stage)
@@ -3204,11 +3230,15 @@ def results_by_user(request, test, username):
         'total': False
     }
 
-    required_modules = _required_modules_for_test(test_obj)
+    attempt_id = _resolve_attempt_id(user, test_obj, selected_review=selected_review, classroom=classroom)
+    
+    stage = TestStage.objects.filter(user=user, test=test_obj, attempt_id=attempt_id).first()
+    mode = stage.mode if stage else 'full_test'
+
+    required_modules = _required_modules_for_test(test_obj, mode=mode)
     if not required_modules:
         return HttpResponse("Questions are not found", status=404)
 
-    attempt_id = _resolve_attempt_id(user, test_obj, selected_review=selected_review, classroom=classroom)
     latest_modules = _load_latest_modules(user, test_obj, attempt_id=attempt_id, classroom=classroom)
 
     missing_modules = []
@@ -3311,7 +3341,9 @@ def results_by_user(request, test, username):
 
 def _generate_certificate_response(user, test_obj, testreview):
     test_mode = get_test_mode(test_obj)
-    required_modules = _required_modules_for_test(test_obj)
+    stage = TestStage.objects.filter(user=user, test=test_obj, attempt_id=testreview.attempt_id).first()
+    mode = stage.mode if stage else 'full_test'
+    required_modules = _required_modules_for_test(test_obj, mode=mode)
     if not required_modules:
         return HttpResponse("No valid questions found for certificate", status=400)
 
@@ -8498,7 +8530,7 @@ def get_test_mode(test):
     return 'empty'
 
 
-def get_test_sequence(test):
+def get_test_sequence(test, mode='full_test'):
     """Return only supported SAT module slots that actually contain questions.
 
     Older code allowed NULL or arbitrary module values into the sequence.  The UI,
@@ -8507,20 +8539,27 @@ def get_test_sequence(test):
     """
     supported = [('module_1', 'm1'), ('module_2', 'm2')]
     sequence = []
+    
     english_modules = set(
         English_Question.objects.filter(test=test, module__in=['module_1', 'module_2'])
         .values_list('module', flat=True)
-    )
+    ) if mode in ('full_test', 'rw_only', 'single_english') else set()
+    
     math_modules = set(
         Math_Question.objects.filter(test=test, module__in=['module_1', 'module_2'])
         .values_list('module', flat=True)
-    )
+    ) if mode in ('full_test', 'math_only', 'single_math') else set()
+    
     for db_module, runtime_module in supported:
         if db_module in english_modules:
             sequence.append(('english', runtime_module))
     for db_module, runtime_module in supported:
         if db_module in math_modules:
             sequence.append(('math', runtime_module))
+            
+    if mode in ('single_english', 'single_math') and len(sequence) > 0:
+        return [sequence[0]]
+        
     return sequence
 
 
@@ -8546,7 +8585,7 @@ def get_makeup_test_sequence(makeup_test):
 
 
 def get_current_test_step(test_stage):
-    sequence = get_test_sequence(test_stage.test)
+    sequence = get_test_sequence(test_stage.test, mode=test_stage.mode)
 
     if not sequence:
         return None
@@ -8558,7 +8597,7 @@ def get_current_test_step(test_stage):
 
 
 def advance_test_stage(test_stage):
-    sequence = get_test_sequence(test_stage.test)
+    sequence = get_test_sequence(test_stage.test, mode=test_stage.mode)
 
     if not sequence:
         return True
@@ -8678,11 +8717,12 @@ def classroom_module_test(request, classroom_id, pk):
         return _redirect_closed_test(request, test, classroom=classroom)
 
     user = request.user
-    sequence = get_test_sequence(test)
+    
+    test_stage, created = _get_or_create_regular_test_stage(user, test, stage=1, classroom=classroom)
+
+    sequence = get_test_sequence(test, mode=test_stage.mode)
     if not sequence:
         return HttpResponse('Questions are not found')
-
-    test_stage, created = _get_or_create_regular_test_stage(user, test, stage=1, classroom=classroom)
 
     current_step = get_current_test_step(test_stage)
     if current_step is None:

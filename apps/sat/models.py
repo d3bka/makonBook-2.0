@@ -595,6 +595,9 @@ class TestStage(BaseModel):
         ('makeup', 'Makeup Test'),
     ]
     test_type = models.CharField(max_length=20, choices=TEST_TYPE_CHOICES, default='regular')
+    
+    time_multiplier = models.FloatField(default=1.0, null=True, blank=True)
+    mode = models.CharField(max_length=50, default='full_test', null=True, blank=True)
 
     def get_max_retakes(self):
         # unlimited
