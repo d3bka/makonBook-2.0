@@ -275,7 +275,7 @@ mjx-container {
 .reference-body {
     padding: 18px;
     overflow-y: auto;
-    height: calc(100vh - 69px);
+    height: calc(100vh - 65px);
     background: var(--mk-bg-elevated, #fff);
 }
 
@@ -392,4 +392,93 @@ mjx-container {
 .fa-home {
     color: #ffffff !important;
     opacity: 1 !important;
+}
+.sat-reference-wrapper {
+    padding: 10px;
+}
+.sat-ref-flex {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    justify-content: center;
+    align-items: flex-end;
+    margin-bottom: 24px;
+}
+.ref-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    flex: 0 1 120px;
+}
+.ref-svg {
+    width: 100px;
+    height: 100px;
+    margin-bottom: 4px;
+    color: var(--mk-text, #111827);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.ref-svg-text {
+    font-family: 'Times New Roman', Times, serif;
+    font-style: italic;
+    font-size: 16px;
+    stroke: none;
+}
+.ref-formula {
+    font-family: 'Times New Roman', Times, serif;
+    font-style: italic;
+    font-size: 16px;
+    color: var(--mk-text, #111827);
+    line-height: 1.4;
+    white-space: nowrap;
+}
+.ref-section-title {
+    width: 100%;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--mk-text-muted, #4b5563);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.ref-footer {
+    width: 100%;
+    margin-top: 30px;
+    padding-top: 15px;
+    border-top: 1px solid var(--mk-card-border, #e5e7eb);
+    text-align: left;
+    font-size: 15px;
+    color: var(--mk-text, #111827);
+    font-family: 'Times New Roman', Times, serif;
+    line-height: 1.5;
+}
+.ref-footer p {
+    margin: 6px 0;
+}
+@media (max-width: 600px) {
+    .sat-ref-flex { gap: 10px; margin-bottom: 16px; }
+    .ref-item { flex: 0 1 100px; }
+    .ref-svg { width: 80px; height: 80px; }
+    .ref-formula { font-size: 14px; }
+}
+
+.math-frac {
+    display: inline-block;
+    vertical-align: middle;
+    text-align: center;
+    font-size: 0.8em;
+    margin: 0 1px;
+}
+.math-num {
+    display: block;
+    border-bottom: 1.5px solid currentColor;
+    line-height: 1.2;
+    padding: 0 1px;
+}
+.math-den {
+    display: block;
+    line-height: 1.2;
+    padding: 0 1px;
 }
