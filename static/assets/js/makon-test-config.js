@@ -9,7 +9,7 @@ class PreTestConfigModal {
     ];
     this.modes = [
       { id: "full_test", title: "Full Test", desc: "All modules (RW + Math)", baseMin: 134, isDefault: true, icon: "bi-bullseye" },
-      { id: "rw_only", title: "Reading & Writing Only", desc: "Both RW modules", baseMin: 64, icon: "bi-book" },
+      { id: "rw_only", title: "English Only", desc: "Both RW modules", baseMin: 64, icon: "bi-book" },
       { id: "math_only", title: "Math Only", desc: "Both Math modules", baseMin: 70, icon: "bi-calculator" },
       { id: "single_module", title: "Single Module", desc: "Practice one module", baseMin: 32, icon: "bi-lightning-charge" }
     ];
@@ -56,20 +56,21 @@ class PreTestConfigModal {
       <div class="ptc-dialog" role="dialog" aria-modal="true">
         <div class="ptc-section-title">Time Accommodation</div>
         <div class="ptc-speed-row">${speedHtml}</div>
-        <div class="ptc-section-title">What to Practice</div>
+        <div class="ptc-section-title">Choose module</div>
         <div class="ptc-mode-grid">${modeHtml}</div>
         
-        <div class="ptc-submode-container" id="ptc-submode-container" style="display: none; margin-bottom: 24px; animation: ptcFadeIn 0.2s ease-out;">
-            <div class="ptc-section-title" style="font-size: 0.95rem; margin-bottom: 12px; margin-top: 4px;">Choose Subject</div>
+        
+
+
+        <div class="ptc-submode-container" id="ptc-submode-container" style="display: none; margin-top: 12px; animation: ptcFadeIn 0.2s ease-out;">
             <div style="display: flex; gap: 12px;">
                 ${this.subModes.map(sm => `
-                <div class="ptc-submode-card" data-sub="${sm.id}" style="flex: 1; padding: 12px 16px; border: 2px solid var(--mk-border); border-radius: 12px; cursor: pointer; text-align: center; font-weight: 500; font-size: 0.95rem; color: var(--mk-gray); transition: all 0.2s ease;">
+                <div class="ptc-submode-card" data-sub="${sm.id}" style="flex: 1; padding: 10px; border: 1.5px solid var(--mk-border); border-radius: 10px; cursor: pointer; text-align: center; font-weight: 600; font-size: 0.9rem; transition: all 0.2s ease;">
                     ${sm.title}
                 </div>
                 `).join('')}
             </div>
         </div>
-
         <div class="ptc-summary">
           <div>
             <div class="ptc-summary-label">Estimated Duration</div>
@@ -158,13 +159,9 @@ class PreTestConfigModal {
         subContainer.style.display = 'block';
         this.el.querySelectorAll('.ptc-submode-card').forEach(c => {
             if (c.getAttribute('data-sub') === this.state.mode) {
-                c.style.borderColor = 'var(--mk-text)';
-                c.style.color = 'var(--mk-text)';
-                c.style.backgroundColor = 'var(--mk-border)';
+                c.classList.add('is-active');
             } else {
-                c.style.borderColor = 'var(--mk-border)';
-                c.style.color = 'var(--mk-gray)';
-                c.style.backgroundColor = 'transparent';
+                c.classList.remove('is-active');
             }
         });
     } else {
@@ -177,7 +174,6 @@ class PreTestConfigModal {
       if (el) el.textContent = this._fmt(Math.round(m.baseMin * this.state.multiplier));
     });
     
-    // Special handling to update the badge text on the main 'single_module' card to match the submode
     if (isSingle) {
         const smObj = this.subModes.find(m => m.id === this.state.mode);
         const el = document.getElementById('ptc-badge-single_module');
@@ -243,11 +239,23 @@ class PreTestConfigModal {
   open(testName, classroomId = null) {
     this.state.testName = testName;
     this.state.classroomId = classroomId;
+    const btn = this.el.querySelector('#ptc-btn-start');
+    if (btn) {
+        btn.classList.remove('is-loading');
+        btn.disabled = false;
+    }
     this.el.classList.add('is-open');
   }
 
   close() {
     this.el.classList.remove('is-open');
+    const btn = this.el.querySelector('#ptc-btn-start');
+    if (btn) {
+        btn.classList.remove('is-loading');
+        btn.disabled = false;
+    }
+    // Fire pageshow event to reset the dashboard "Opening..." button and unlock navigation
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
   }
 }
 

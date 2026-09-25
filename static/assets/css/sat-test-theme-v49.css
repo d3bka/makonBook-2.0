@@ -47,7 +47,7 @@ html[data-theme="light"] body.github-test-template-v20 .test-save-status {
 }
 
 html[data-theme="light"] body.github-test-template-v20 .question-title {
-  background: linear-gradient(135deg, #faf8ff 0%, #f1ecff 100%) !important;
+  /* background: linear-gradient(135deg, #faf8ff 0%, #f1ecff 100%) !important; */
   border-color: rgba(109, 40, 217, .14) !important;
 }
 

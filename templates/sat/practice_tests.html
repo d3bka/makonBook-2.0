@@ -177,7 +177,7 @@
                     <a
                       href="{% url 'classroom_practise' classroom.id test.name %}"
                       class="practice-action"
-                      data-practice-navigate
+                      {% if test.card_state != 'continue' %}data-practice-navigate{% endif %}
                     >
                       <span>{{ test.action_label }}</span>
                       <i class="bi bi-arrow-right" aria-hidden="true"></i>
@@ -186,7 +186,7 @@
                     <a
                       href="{% url 'practise' test.name %}"
                       class="practice-action"
-                      data-practice-navigate
+                      {% if test.card_state != 'continue' %}data-practice-navigate{% endif %}
                     >
                       <span>{{ test.action_label }}</span>
                       <i class="bi bi-arrow-right" aria-hidden="true"></i>

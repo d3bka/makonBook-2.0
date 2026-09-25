@@ -8537,6 +8537,7 @@ def get_test_sequence(test, mode='full_test'):
     draft models, scoring, and guest completion logic support only module_1/m1 and
     module_2/m2, so an invalid admin/import value could trap an attempt forever.
     """
+    # Fallback/Legacy
     supported = [('module_1', 'm1'), ('module_2', 'm2')]
     sequence = []
     
