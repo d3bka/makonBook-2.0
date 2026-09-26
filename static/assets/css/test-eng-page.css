@@ -63,3 +63,29 @@ body.mk-test-window .question-title .crossing-options {
     background-size: 20px 20px;
     padding-left: 0 !important;
 }
+
+/* Force correct styles on eng tools by overriding ID specificity */
+body.scroll-hide.mk-test-window header a[data-test-exit] {
+    border-radius: 50% !important;
+    background: var(--sat-panel, rgba(124, 58, 237, 0.1)) !important;
+    border: 1px solid var(--sat-border, rgba(255, 255, 255, 0.1)) !important;
+    color: var(--sat-text, #ffffff) !important;
+    cursor: pointer !important;
+    width: 44px !important;
+    height: 44px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+body.scroll-hide.mk-test-window header a[data-test-exit]:hover {
+    background: var(--sat-purple-2, #7c3aed) !important;
+    color: #ffffff !important;
+    border-color: var(--sat-purple-2, #7c3aed) !important;
+}
+
+body.scroll-hide.mk-test-window header a[data-test-exit] i {
+    color: inherit !important;
+}

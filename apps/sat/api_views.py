@@ -6,7 +6,7 @@ from django.views.decorators.http import require_POST
 from apps.sat.models import Test
 from apps.sat.views import _get_or_create_regular_test_stage
 
-_PTC_VALID_MODES = {'full_test', 'rw_only', 'math_only', 'single_english', 'single_math'}
+_PTC_VALID_MODES = {'full_test', 'rw_only', 'math_only', 'single_english_m1', 'single_english_m2', 'single_math_m1', 'single_math_m2'}
 _PTC_VALID_MULTIPLIERS = {0.5, 0.75, 1.0, 1.5, 2.0}
 
 @login_required(login_url='/login/')

@@ -14,8 +14,10 @@ class PreTestConfigModal {
       { id: "single_module", title: "Single Module", desc: "Practice one module", baseMin: 32, icon: "bi-lightning-charge" }
     ];
     this.subModes = [
-      { id: "single_english", title: "Single RW", baseMin: 32 },
-      { id: "single_math", title: "Single Math", baseMin: 35 }
+      { id: "single_english_m1", title: "Eng M1", baseMin: 32 },
+      { id: "single_english_m2", title: "Eng M2", baseMin: 32 },
+      { id: "single_math_m1", title: "Math M1", baseMin: 35 },
+      { id: "single_math_m2", title: "Math M2", baseMin: 35 }
     ];
     this.state = { multiplier: 1.0, mode: "full_test", testName: null, classroomId: null };
     this._buildDOM();
@@ -117,7 +119,7 @@ class PreTestConfigModal {
         card.classList.add('is-active');
         const clickedMode = card.getAttribute('data-id');
         if (clickedMode === 'single_module') {
-            this.state.mode = 'single_english'; // default submode
+            this.state.mode = 'single_english_m1'; // default submode
         } else {
             this.state.mode = clickedMode;
         }
