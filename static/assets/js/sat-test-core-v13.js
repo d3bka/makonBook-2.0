@@ -912,19 +912,16 @@
       });
 
       document.querySelectorAll('[data-test-exit]').forEach((link) => {
-        link.addEventListener('click', async (event) => {
+        link.addEventListener('click', (event) => {
           if (this.submitInProgress) {
             event.preventDefault();
             return;
           }
-          if (!window.confirm('Leave this module? Your latest answers will be saved, but the timer will keep running.')) {
-            event.preventDefault();
-            return;
-          }
           event.preventDefault();
-          await this.autosave(true);
+          // Fire and forget autosave with keepalive: true
+          this.autosave(true).catch(() => {});
           this.navigatingAway = true;
-          window.location.assign(link.href);
+          window.location.href = link.href;
         });
       });
 

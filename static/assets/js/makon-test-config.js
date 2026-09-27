@@ -65,9 +65,9 @@ class PreTestConfigModal {
 
 
         <div class="ptc-submode-container" id="ptc-submode-container" style="display: none; margin-top: 12px; animation: ptcFadeIn 0.2s ease-out;">
-            <div style="display: flex; gap: 12px;">
+            <div class="ptc-submode-grid">
                 ${this.subModes.map(sm => `
-                <div class="ptc-submode-card" data-sub="${sm.id}" style="flex: 1; padding: 10px; border: 1.5px solid var(--mk-border); border-radius: 10px; cursor: pointer; text-align: center; font-weight: 600; font-size: 0.9rem; transition: all 0.2s ease;">
+                <div class="ptc-submode-card" data-sub="${sm.id}" >
                     ${sm.title}
                 </div>
                 `).join('')}

@@ -8541,8 +8541,11 @@ def get_test_sequence(test, mode='full_test'):
     supported = [('module_1', 'm1'), ('module_2', 'm2')]
     sequence = []
     
+    if not mode:
+        mode = 'full_test'
+
     english_modules = set()
-    if mode in ('full_test', 'rw_only'):
+    if mode in ('full_test', 'rw_only', 'single_english'):
         english_modules = set(English_Question.objects.filter(test=test, module__in=['module_1', 'module_2']).values_list('module', flat=True))
     elif mode == 'single_english_m1':
         english_modules = set(English_Question.objects.filter(test=test, module='module_1').values_list('module', flat=True))
@@ -8550,7 +8553,7 @@ def get_test_sequence(test, mode='full_test'):
         english_modules = set(English_Question.objects.filter(test=test, module='module_2').values_list('module', flat=True))
         
     math_modules = set()
-    if mode in ('full_test', 'math_only'):
+    if mode in ('full_test', 'math_only', 'single_math'):
         math_modules = set(Math_Question.objects.filter(test=test, module__in=['module_1', 'module_2']).values_list('module', flat=True))
     elif mode == 'single_math_m1':
         math_modules = set(Math_Question.objects.filter(test=test, module='module_1').values_list('module', flat=True))
@@ -8563,6 +8566,9 @@ def get_test_sequence(test, mode='full_test'):
     for db_module, runtime_module in supported:
         if db_module in math_modules:
             sequence.append(('math', runtime_module))
+            
+    if mode in ('single_english', 'single_math') and len(sequence) > 0:
+        return [sequence[0]]
             
     return sequence
 
